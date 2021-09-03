@@ -1,1 +1,1 @@
-# free-energy-minimization
+# Approximate free-energy minimization
