@@ -1,18 +1,55 @@
+import torch
 import torch.nn as nn
+import torch.autograd as autograd
+
+from .utils import filter_kwargs, remove_kwargs
 
 
-class FeedForward(nn.Module):
-    def __init__(self, dim, dim_out=None, mult=4, dropout=0., dense=nn.Linear):
+class RootFind(nn.Module):
+    _default_kwargs = {
+        'solver_fwd_max_iter': 30,
+        'solver_fwd_tol': 1e-4,
+        'solver_bwd_max_iter': 30,
+        'solver_bwd_tol': 1e-4,
+    }
+
+    def __init__(self, fun, solver, **kwargs):
         super().__init__()
-        inner_dim = int(dim * mult)
-        dim_out = dim_out if dim_out is not None else dim
-        self.net = nn.Sequential(
-            dense(dim, inner_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            dense(inner_dim, dim_out),
-            nn.Dropout(dropout)
-        )
+        self.fun = fun
+        self.solver = solver
+        self.kwargs = self._default_kwargs
+        self.kwargs.update(**kwargs)
 
-    def forward(self, x):
-        return self.net(x)
+    def _root_find(self, x, z0, *args, **kwargs):
+        # Compute forward pass: find root of function outside autograd tape.
+        with torch.no_grad():
+            z_root = self.solver(
+                lambda z: self.fun(z, x, *args, **remove_kwargs(kwargs, 'solver_')),
+                z0,
+                **filter_kwargs(kwargs, 'solver_fwd_'),
+            )['result']
+
+        if self.training:
+            # Re-engage autograd tape (no-op in terms of value of z).
+            z_root = z_root + self.fun(z_root, x, *args, **remove_kwargs(kwargs, 'solver_'))
+
+            # Set up backward hook for root-solving in backward pass.
+            z_bwd = z_root.clone().detach().requires_grad_()
+            fun_bwd = self.fun(z_bwd, x, *args, **remove_kwargs(kwargs, 'solver_'))
+
+            def backward_hook(grad):
+                new_grad = self.solver(
+                    lambda y: autograd.grad(
+                        fun_bwd, z_bwd, y, retain_graph=True)[0]
+                    + grad,
+                    torch.zeros_like(grad),
+                    **filter_kwargs(kwargs, 'solver_bwd_'),
+                )['result']
+                return new_grad
+
+            z_root.register_hook(backward_hook)
+
+        return z_root
+
+    def forward(self, x, z0, *args, **kwargs):
+        return self._root_find(x, z0, *args, **{**self.kwargs, **kwargs})
