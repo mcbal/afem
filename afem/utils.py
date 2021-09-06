@@ -30,3 +30,15 @@ def default(val, d):
     if exists(val):
         return val
     return d() if isfunction(d) else d
+
+
+def batched_eye(bsz: int, dim: int, device, dtype):
+    return torch.eye(dim, device=device, dtype=dtype)[None, :, :].repeat(
+        bsz, 1, 1
+    )
+
+
+def batched_eye_like(X: torch.Tensor):
+    return torch.eye(*X.shape[1:], out=torch.empty_like(X))[None, :, :].repeat(
+        X.shape[0], 1, 1
+    )

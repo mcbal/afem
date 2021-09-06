@@ -6,8 +6,8 @@ import numpy as np
 from einops import rearrange, repeat
 
 from .modules import RootFind
-# from .solvers import broyden
-from .utils import default
+from .solvers import newton
+from .utils import default, batched_eye_like
 
 
 class VectorSpinModel(nn.Module):
@@ -28,7 +28,7 @@ class VectorSpinModel(nn.Module):
         self.dim = dim
         self.beta = beta
 
-        self._init_weight(
+        self._init_J(
             num_spins,
             init_std=(
                 J_init_std
@@ -41,8 +41,8 @@ class VectorSpinModel(nn.Module):
         self.J_traceless = J_traceless
 
         self.diff_root_finder = RootFind(
-            self._partition_function_grad_t_phi,
-            broyden,
+            self._grad_t_phi,
+            newton,
             solver_fwd_max_iter=40,
             solver_fwd_tol=1e-4,
             solver_bwd_max_iter=40,
@@ -51,7 +51,10 @@ class VectorSpinModel(nn.Module):
 
     def _init_J(self, num_spins, init_std, training):
         """Initialize random coupling matrix."""
-        J = torch.zeros(num_spins, num_spins).normal_(0, init_std)
+        J = torch.zeros(num_spins, num_spins).uniform_(0, init_std)
+        # J = torch.diag(torch.ones(self.num_spins-1), 1)
+        # J = (J + J.t()) / 2
+        print(J)
         if training:
             self._J = nn.Parameter(J)
         else:
@@ -70,31 +73,43 @@ class VectorSpinModel(nn.Module):
     def _prepare_sources(self, x):
         pass
 
-    def _partition_function_phi(self, h, t, beta=None, J=None):
+    def _phi_prep(self, t, J):
+        assert t.ndim == 2, f'Tensor `t` should have either shape (batch, 1) or (batch, N) but found shape {t.shape}'
+        t = t.expand(-1, self.num_spins) if t.shape[-1] == 1 else t
+        V = torch.diag_embed(t) - J.unsqueeze(0).expand(t.shape[0], -1, -1)
+        V_inv = torch.solve(batched_eye_like(V), V).solution
+        return t, V, V_inv
+
+    def _phi(self, t, h, beta=None, J=None):
         """Compute `phi` given partition function parameters."""
-        beta, J = default(beta, self.beta), default(J, self.J)
-        t = t * torch.ones(self.num_spins, device=h.device, dtype=h.dtype) if t.numel() == 1 else t
-        V = torch.diag(t) - J
-        V_inv = torch.solve(torch.ones_like(V), V).solution
+        beta, J = default(beta, self.beta), default(J, self.J())
+        t, V, V_inv = self._phi_prep(t, J)
+
         return (
-            repeat(beta * t.sum() - 0.5 * torch.logdet(V), '() -> b', b=h.size(0))
-            + beta / (4.0 * self.dim) * torch.einsum('b i f, i j, b j f -> b', h, V_inv, h)
+            beta * t.sum(-1) - 0.5 * torch.logdet(V)
+            + beta / (4.0 * self.dim) * torch.einsum('b i f, b i j, b j f -> b', h, V_inv, h)
         )
 
-    def _partition_function_grad_t_phi(self, h, t, beta=None, J=None):
+    def _grad_t_phi(self, t, h, beta=None, J=None):
         """Compute gradient of `phi` with respect to auxiliary variables `t`."""
-        beta, J = default(beta, self.beta), default(J, self.J)
-        t = t * torch.ones(self.num_spins, device=h.device, dtype=h.dtype) if t.numel() == 1 else t
-        V = torch.diag(t) - J
-        V_inv = torch.solve(torch.ones_like(V), V).solution
-        return (
-            repeat(beta - 0.5 * torch.diag(V_inv).sum(), '() -> b', b=h.size(0))
-            + beta / (4.0 * self.dim) * torch.einsum('b i f, b i f -> b i', h, h)
-        )
+        beta, J = default(beta, self.beta), default(J, self.J())
+        _, V, V_inv = self._phi_prep(t, J)
+
+        if t.shape[-1] == 1:
+            # Scalar t that got expanded to vector t (identical elements for every spin index)
+            return (
+                beta * self.num_spins * torch.ones_like(t) - 0.5 * torch.diagonal(V_inv, dim1=-2, dim2=-1).sum(-1, keepdim=True)
+                - beta / (4.0 * self.dim) * torch.einsum('b i f, b j f, b i k, b k j -> b', h, h, V_inv, V_inv).unsqueeze(-1)
+            )
+        else:
+            # Vector t (different elements for every spin index)
+            return (
+                beta * torch.ones_like(t) - 0.5 * torch.diagonal(V_inv, dim1=-2, dim2=-1)
+                - beta / (4.0 * self.dim) * torch.einsum('b k f, b l f, b i k, b l i -> b i', h, h, V_inv, V_inv)
+            )
 
     def approximate_free_energy(self, beta, phi):
-        math.pi
-        return (1.0 / beta) *
+        pass
 
     def forward(self, x, beta=None, return_responses=False):
         """Probe model with data. Returns free energy and responses."""
@@ -104,10 +119,10 @@ class VectorSpinModel(nn.Module):
 
         # Find values for which `phi` appearing in exponential inside partition function is stationary.
         t0 = torch.zeros(self.num_spins, device=x.device, dtype=x.dtype)
-        t_star = self.diff_root_finder(h, t0, beta=beta)
+        t_star = self.diff_root_finder(t0, h, beta=beta)
 
         # Evaluate `phi` at stationary point.
-        phi_star = self._partition_function_phi(self, h, t_star, beta=beta)
+        phi_star = self._phi(self, t_star, h, beta=beta)
 
         # Compute approximate free energy.
         # afe = self.approximate_free_energy
