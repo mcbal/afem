@@ -51,10 +51,13 @@ class VectorSpinModel(nn.Module):
 
     def _init_J(self, num_spins, init_std, training):
         """Initialize random coupling matrix."""
-        J = torch.zeros(num_spins, num_spins).uniform_(0, init_std)
-        # J = torch.diag(torch.ones(self.num_spins-1), 1)
-        # J = (J + J.t()) / 2
+        J = torch.zeros(num_spins, num_spins).normal_(0, init_std)
+        mask = torch.zeros(num_spins).normal_(0, 2*init_std)*torch.eye(num_spins, num_spins)
+        print(mask)
         print(J)
+        J += torch.diag(mask)
+
+        breakpoint()
         if training:
             self._J = nn.Parameter(J)
         else:
