@@ -5,8 +5,8 @@ import torch.nn as nn
 import numpy as np
 from einops import rearrange, repeat
 
-from .modules import RootFind
-from .solvers import newton
+from .rootfind import RootFind
+from .solvers import broyden
 from .utils import default, batched_eye_like
 
 
@@ -42,10 +42,10 @@ class VectorSpinModel(nn.Module):
 
         self.diff_root_finder = RootFind(
             self._grad_t_phi,
-            newton,
-            solver_fwd_max_iter=40,
+            broyden,
+            solver_fwd_max_iter=30,
             solver_fwd_tol=1e-4,
-            solver_bwd_max_iter=40,
+            solver_bwd_max_iter=30,
             solver_bwd_tol=1e-4,
         )
 
@@ -53,11 +53,11 @@ class VectorSpinModel(nn.Module):
         """Initialize random coupling matrix."""
         J = torch.zeros(num_spins, num_spins).normal_(0, init_std)
         mask = torch.zeros(num_spins).normal_(0, 2*init_std)*torch.eye(num_spins, num_spins)
-        print(mask)
-        print(J)
+        # print(mask)
+        # print(J)
         J += torch.diag(mask)
 
-        breakpoint()
+        # breakpoint()
         if training:
             self._J = nn.Parameter(J)
         else:
