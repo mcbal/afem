@@ -22,6 +22,7 @@ class RootFind(nn.Module):
         self.kwargs.update(**kwargs)
 
     def _root_find(self, z0, x, *args, **kwargs):
+
         # Compute forward pass: find root of function outside autograd tape.
         with torch.no_grad():
             z_root = self.solver(

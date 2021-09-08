@@ -113,13 +113,13 @@ def matvec(part_Us, part_VTs, x):
 
 def broyden(g, x0, max_iter, tol=1e-4, armijo_line_search=True):
     bsz, k = x0.size()
-    device = x0.device
+    device, dtype = x0.device, x0.dtype
 
     # Initialize 0-th iteration.
     x, gx = x0, g(x0)
     # Initialize tensors for inverse Jacobian approximation.
-    Us = torch.zeros(bsz, k, max_iter).to(device)
-    VTs = torch.zeros(bsz, max_iter, k).to(device)
+    Us = torch.zeros(bsz, k, max_iter, dtype=dtype).to(device)
+    VTs = torch.zeros(bsz, max_iter, k, dtype=dtype).to(device)
     # Propose initial update direction.
     update = -matvec(Us[:, :, :0], VTs[:, :0], gx)
 
@@ -139,8 +139,6 @@ def broyden(g, x0, max_iter, tol=1e-4, armijo_line_search=True):
             min_step = n_step
 
         new_objective = trace[-1]
-        print(trace)
-        # breakpoint()
 
         if new_objective < tol:
             break
