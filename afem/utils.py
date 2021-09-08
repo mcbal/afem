@@ -45,11 +45,21 @@ def batched_eye_like(X: torch.Tensor):
     )
 
 
-def batched_jacobian(func, x, create_graph=False):
+def batched_jacobian_for_scalar_fun(f, x, create_graph=False):
     """
     https://discuss.pytorch.org/t/jacobian-functional-api-batch-respecting-jacobian/84571/6
     https://discuss.pytorch.org/t/computing-batch-jacobian-efficiently/80771/4
     """
-    def _func_sum(x):
-        return func(x).sum(dim=0)
-    return autograd.functional.jacobian(_func_sum, x, create_graph=create_graph).permute(1, 0, 2)
+    def _f_sum(x):
+        return f(x).sum(dim=0)
+    return autograd.functional.jacobian(_f_sum, x, create_graph=create_graph)
+
+
+def batched_jacobian_for_vector_fun(f, x, create_graph=False):
+    """
+    https://discuss.pytorch.org/t/jacobian-functional-api-batch-respecting-jacobian/84571/6
+    https://discuss.pytorch.org/t/computing-batch-jacobian-efficiently/80771/4
+    """
+    def _f_sum(x):
+        return f(x).sum(dim=0)
+    return autograd.functional.jacobian(_f_sum, x, create_graph=create_graph).permute(1, 0, 2)

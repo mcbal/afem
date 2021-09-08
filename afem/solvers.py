@@ -22,7 +22,7 @@ def _safe_norm(v):
     return torch.norm(v)
 
 
-def scalar_search_armijo(phi, phi0, derphi0, c1=1e-4, alpha0=1, amin=0):
+def scalar_search_armijo(phi, phi0, derphi0, c1=1e-4, alpha0=1, amin=1e-1):
     ite = 0
     phi_a0 = phi(alpha0)
     if phi_a0 <= phi0 + c1*alpha0*derphi0:
@@ -32,6 +32,7 @@ def scalar_search_armijo(phi, phi0, derphi0, c1=1e-4, alpha0=1, amin=0):
     phi_a1 = phi(alpha1)
 
     while alpha1 > amin:
+        print(alpha1, amin)
         factor = alpha0**2 * alpha1**2 * (alpha1-alpha0)
         a = alpha0**2 * (phi_a1 - phi0 - derphi0*alpha1) - \
             alpha1**2 * (phi_a0 - phi0 - derphi0*alpha0)
@@ -63,23 +64,19 @@ def line_search(update, x0, g0, g, n_step=0, on=True):
     tmp_g0 = [g0]
     tmp_phi = [torch.norm(g0)**2]
 
-    def phi(s, store=True):
-        if s == tmp_s[0]:
-            return tmp_phi[0]
+    def phi(s):
         x_est = x0 + s * update
         g0_new = g(x_est)
         phi_new = _safe_norm(g0_new)**2
-        if store:
-            tmp_s[0] = s
-            tmp_g0[0] = g0_new
-            tmp_phi[0] = phi_new
         return phi_new
 
     if on:
-        s, _, ite = scalar_search_armijo(phi, tmp_phi[0], -tmp_phi[0], amin=1e-2)
+        s, _, ite = scalar_search_armijo(phi, tmp_phi[0], -tmp_phi[0])
     if (not on) or s is None:
         s = 1.0
         ite = 0
+
+    print(s)
 
     x_est = x0 + s * update
     if s == tmp_s[0]:
@@ -140,6 +137,8 @@ def broyden(g, x0, max_iter, tol=1e-4, armijo_line_search=True):
 
         new_objective = trace[-1]
 
+        print(gx, x, trace[-1], update)
+
         if new_objective < tol:
             break
         # if new_objective < 3 * eps and n_step > 30 and np.max(trace_dict[stop_mode][-30:]) / np.min(
@@ -154,8 +153,8 @@ def broyden(g, x0, max_iter, tol=1e-4, armijo_line_search=True):
         part_Us, part_VTs = Us[:, :, :n_step-1], VTs[:, :n_step-1]
         vT = rmatvec(part_Us, part_VTs, delta_x)
         u = (delta_x - matvec(part_Us, part_VTs, delta_gx)) / torch.einsum('bi, bi -> b', vT, delta_gx)[:, None]
-        VTs[:, n_step-1] = vT.nan_to_num()
-        Us[:, :, n_step-1] = u.nan_to_num()
+        VTs[:, n_step-1] = torch.nan_to_num(vT)
+        Us[:, :, n_step-1] = torch.nan_to_num(u)
         # Propose new update direction.
         update = -matvec(Us[:, :, :n_step], VTs[:, :n_step], gx)
 

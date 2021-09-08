@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.autograd as autograd
 
-from .solvers import broyden
+from .solvers import newton
 from .utils import filter_kwargs, remove_kwargs
 
 
@@ -14,7 +14,7 @@ class RootFind(nn.Module):
         'solver_bwd_tol': 1e-4,
     }
 
-    def __init__(self, fun, solver=broyden, **kwargs):
+    def __init__(self, fun, solver=newton, **kwargs):
         super().__init__()
         self.fun = fun
         self.solver = solver
@@ -33,7 +33,7 @@ class RootFind(nn.Module):
 
         if self.training:
             # Re-engage autograd tape (no-op in terms of value of z).
-            new_z_root = z_root + self.fun(z_root.requires_grad_(), x, *args, **remove_kwargs(kwargs, 'solver_'))
+            new_z_root = z_root - self.fun(z_root.requires_grad_(), x, *args, **remove_kwargs(kwargs, 'solver_'))
 
             # Set up backward hook for root-solving in backward pass.
             z_bwd = new_z_root.clone().detach().requires_grad_()
@@ -41,7 +41,7 @@ class RootFind(nn.Module):
 
             def backward_hook(grad):
                 new_grad = self.solver(
-                    lambda y: autograd.grad(fun_bwd, z_bwd, y, retain_graph=True)[0] + grad,
+                    lambda y: autograd.grad(fun_bwd, z_bwd, y, retain_graph=True, create_graph=True)[0] + grad,
                     torch.zeros_like(grad),
                     **filter_kwargs(kwargs, 'solver_bwd_'),
                 )['result']

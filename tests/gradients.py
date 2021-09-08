@@ -14,7 +14,7 @@ class TestAnalyticalGradients(unittest.TestCase):
         model = VectorSpinModel(
             num_spins=num_spins,
             dim=dim,
-            beta=1.0 / np.sqrt(dim),
+            beta=1.0,
         ).double()
 
         h = torch.randn(1, num_spins, dim).double()
@@ -33,7 +33,7 @@ class TestAnalyticalGradients(unittest.TestCase):
         model = VectorSpinModel(
             num_spins=num_spins,
             dim=dim,
-            beta=1.0 / np.sqrt(dim),
+            beta=1.0,
         ).double()
 
         h = torch.randn(1, num_spins, dim).double()
@@ -58,11 +58,11 @@ class TestRootFindingGradients(unittest.TestCase):
             beta=1.0,
         ).double()
 
-        x = (torch.randn(1, num_spins, dim) / np.sqrt(dim)).double()
+        x = torch.randn(1, num_spins, dim).double()
 
         self.assertTrue(
             gradcheck(
-                model,
+                lambda x: model(x)[0],
                 x.requires_grad_(),
                 eps=1e-4,
                 atol=1e-3,
