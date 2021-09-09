@@ -49,7 +49,7 @@ class TestAnalyticalGradients(unittest.TestCase):
 
 class TestRootFindingGradients(unittest.TestCase):
 
-    def test_vector_spin_model_forward(self):
+    def test_vector_spin_model_forward_afe(self):
         num_spins, dim = 11, 32
 
         model = VectorSpinModel(
@@ -64,9 +64,30 @@ class TestRootFindingGradients(unittest.TestCase):
             gradcheck(
                 lambda x: model(x)[0],
                 x.requires_grad_(),
-                eps=1e-4,
-                atol=1e-3,
-                check_undefined_grad=True,
+                eps=1e-5,
+                atol=1e-4,
+                check_undefined_grad=False,
+            )
+        )
+
+    def test_vector_spin_model_forward_responses(self):
+        num_spins, dim = 11, 32
+
+        model = VectorSpinModel(
+            num_spins=num_spins,
+            dim=dim,
+            beta=1.0,
+        ).double()
+
+        x = torch.randn(1, num_spins, dim).double()
+
+        self.assertTrue(
+            gradcheck(
+                lambda x: model(x, return_responses=True)[2],
+                x.requires_grad_(),
+                eps=1e-5,
+                atol=1e-4,
+                check_undefined_grad=False,
             )
         )
 

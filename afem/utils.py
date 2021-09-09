@@ -62,4 +62,4 @@ def batched_jacobian_for_vector_fun(f, x, create_graph=False):
     """
     def _f_sum(x):
         return f(x).sum(dim=0)
-    return autograd.functional.jacobian(_f_sum, x, create_graph=create_graph).permute(1, 0, 2)
+    return autograd.functional.jacobian(_f_sum, x, create_graph=create_graph)  # .permute(1, 0, 2)

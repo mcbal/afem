@@ -2,7 +2,6 @@
 
 import torch
 import numpy as np
-from torch.autograd.functional import jacobian
 
 
 #############################################################################
@@ -183,14 +182,19 @@ def broyden(g, x0, max_iter, tol=1e-4, armijo_line_search=True):
 def batch_jacobian(f, x):
     """https://discuss.pytorch.org/t/jacobian-functional-api-batch-respecting-jacobian/84571/6"""
     def f_sum(x): return torch.sum(f(x), dim=0)
-    return jacobian(f_sum, x).permute(1, 0, 2)
+    return torch.autograd.functional.jacobian(f_sum, x).permute(1, 0, 2)
 
 
-def newton(f, z_init, max_iter=40, tol=1e-4):
+def newton(f, z_init, grad_f=None, max_iter=40, tol=1e-4):
+    def jacobian(f, z):
+        return grad_f(z) if grad_f is not None else batch_jacobian(f, z)
+
     def g(z):
-        return z - torch.linalg.solve(batch_jacobian(f, z), f(z))
+        return z - torch.linalg.solve(jacobian(f, z), f(z))
+
     z_prev, z, num_steps = z_init, g(z_init), 0
     while torch.linalg.norm(z_prev - z) > tol and num_steps < max_iter:
         z_prev, z = z, g(z)
+        # print(f'{z_prev} -> {z} so that {f(z)}')
         num_steps += 1
     return {'result': z}
