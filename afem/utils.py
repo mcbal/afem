@@ -27,9 +27,7 @@ def batch_jacobian(f, x, create_graph=False, swapaxes=True):
 
 def batch_eye(bsz: int, dim: int, device, dtype):
     """Return batch of identity matrices."""
-    return torch.eye(dim, device=device, dtype=dtype)[None, :, :].repeat(
-        bsz, 1, 1
-    )
+    return torch.eye(dim, device=device, dtype=dtype)[None, :, :].repeat(bsz, 1, 1)
 
 
 def batch_eye_like(X: torch.Tensor):
