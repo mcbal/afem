@@ -13,25 +13,28 @@ def set_all_seeds(seed: int):
     torch.cuda.manual_seed_all(seed)
 
 
-def batched_jacobian_for_vector_outputs(f, x, create_graph=False):
+@torch.enable_grad()
+def batch_jacobian(f, x, create_graph=False, swapaxes=True):
     """
+    Compute batched Jacobian for vector outputs of `f`.
     https://discuss.pytorch.org/t/jacobian-functional-api-batch-respecting-jacobian/84571
     """
     def _f_sum(x):
         return f(x).sum(dim=0)
-    return autograd.functional.jacobian(_f_sum, x, create_graph=create_graph).permute(1, 0, 2)
+    jac_f = autograd.functional.jacobian(_f_sum, x, create_graph=create_graph)
+    return jac_f.swapaxes(1, 0) if swapaxes else jac_f
 
 
-def batched_eye(bsz: int, dim: int, device, dtype):
+def batch_eye(bsz: int, dim: int, device, dtype):
     """Return batch of identity matrices."""
     return torch.eye(dim, device=device, dtype=dtype)[None, :, :].repeat(
         bsz, 1, 1
     )
 
 
-def batched_eye_like(X: torch.Tensor):
+def batch_eye_like(X: torch.Tensor):
     """Return batch of identity matrices like given batch of matrices `X`."""
-    return torch.eye(*X.shape[1:], out=torch.empty_like(X))[None, :, :].repeat(X.shape[0], 1, 1)
+    return torch.eye(*X.shape[1:], out=torch.empty_like(X))[None, :, :].repeat(X.size(0), 1, 1)
 
 
 def exists(val):
