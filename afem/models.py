@@ -10,6 +10,13 @@ from .solvers import newton
 from .utils import default, batch_eye_like, batch_jacobian
 
 
+# TODO: Design abstract base class for couplings modules
+# TODO: Add different flavours of couplings (output is always J_ij):
+#           - return J_ij (symmetric traceless matrix as parameters)
+#           - return J_ij + H^T W H (transformer-style based on inputs)
+#               where dim^2 parameters W can be seen as W_Q^T x W_K equivalent
+
+
 class VectorSpinModel(nn.Module):
 
     def __init__(
@@ -40,7 +47,7 @@ class VectorSpinModel(nn.Module):
 
         # Setup couplings.
         J = torch.zeros(num_spins, num_spins).normal_(
-            0, J_init_std if J_init_std is not None else 1.0 / np.sqrt(num_spins*dim)
+            0, J_init_std if J_init_std is not None else 1.0 / np.sqrt(num_spins*dim**2)
         )
         if J_parameter:
             self._J = nn.Parameter(J)
