@@ -69,6 +69,28 @@ class TestRootFindingGradients(unittest.TestCase):
             )
         )
 
+    def test_vector_spin_model_forward_afe_asym(self):
+        num_spins, dim = 11, 17
+
+        model = VectorSpinModel(
+            num_spins=num_spins,
+            dim=dim,
+            beta=1.0,
+            J_symmetric=False,
+        ).double()
+
+        x = torch.randn(3, num_spins, dim).double()
+
+        self.assertTrue(
+            gradcheck(
+                lambda x: model(x)[0],
+                x.requires_grad_(),
+                eps=1e-5,
+                atol=1e-4,
+                check_undefined_grad=False,
+            )
+        )
+
     def test_vector_spin_model_forward_responses(self):
         num_spins, dim = 11, 17
 
@@ -82,7 +104,29 @@ class TestRootFindingGradients(unittest.TestCase):
 
         self.assertTrue(
             gradcheck(
-                lambda x: model(x, return_responses=True)[2],
+                lambda x: model(x, return_magnetizations=True)[2],
+                x.requires_grad_(),
+                eps=1e-5,
+                atol=1e-4,
+                check_undefined_grad=False,
+            )
+        )
+
+    def test_vector_spin_model_forward_responses_asym(self):
+        num_spins, dim = 11, 17
+
+        model = VectorSpinModel(
+            num_spins=num_spins,
+            dim=dim,
+            beta=1.0,
+            J_symmetric=False,
+        ).double()
+
+        x = torch.randn(1, num_spins, dim).double()
+
+        self.assertTrue(
+            gradcheck(
+                lambda x: model(x, return_magnetizations=True)[2],
                 x.requires_grad_(),
                 eps=1e-5,
                 atol=1e-4,
