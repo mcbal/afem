@@ -7,17 +7,15 @@ from einops import repeat
 
 from .rootfind import RootFind
 from .solvers import newton
-from .utils import default, batch_eye_like, batch_jacobian
-
-
-# TODO: Design abstract base class for couplings modules
-# TODO: Add different flavours of couplings (output is always J_ij):
-#           - return J_ij (symmetric traceless matrix as parameters)
-#           - return J_ij + H^T W H (transformer-style based on inputs)
-#               where dim^2 parameters W can be seen as W_Q^T x W_K equivalent
+from .utils import default, batch_eye, batch_eye_like, batch_jacobian
 
 
 class VectorSpinModel(nn.Module):
+    """Implementation of vector spin model.
+
+    ✨
+
+    """
 
     def __init__(
         self,
@@ -26,6 +24,7 @@ class VectorSpinModel(nn.Module):
         beta=1.0,
         beta_requires_grad=True,
         beta_parameter=False,
+        J_add_external=False,
         J_init_std=None,
         J_parameter=True,
         J_symmetric=True,
@@ -47,12 +46,19 @@ class VectorSpinModel(nn.Module):
 
         # Setup couplings.
         J = torch.zeros(num_spins, num_spins).normal_(
-            0, J_init_std if J_init_std is not None else 1.0 / np.sqrt(num_spins*dim**2)
+            0, J_init_std if J_init_std is not None else 1.0 / np.sqrt(num_spins*dim)
         )
+        if J_add_external:
+            J_ext = torch.zeros(dim, dim).normal_(0, 1.0 / dim)
         if J_parameter:
             self._J = nn.Parameter(J)
+            if J_add_external:
+                self._J_ext = nn.Parameter(J_ext)
         else:
             self.register_buffer('_J', J)
+            if J_add_external:
+                self.register_buffer('_J_ext', J_ext)
+        self.J_add_external = J_add_external
         self.J_symmetric = J_symmetric
         self.J_traceless = J_traceless
 
@@ -61,18 +67,25 @@ class VectorSpinModel(nn.Module):
             self._grad_t_phi,
             newton,
             solver_fwd_max_iter=50,
-            solver_fwd_tol=1e-4,
+            solver_fwd_tol=1e-5,
             solver_bwd_max_iter=50,
-            solver_bwd_tol=1e-4,
+            solver_bwd_tol=1e-5,
         )
 
-    def J(self):
-        """Return symmetrized and traceless coupling matrix."""
-        num_spins, J = self._J.size(0), self._J
+    def J(self, h):
+        """Return coupling matrix.
+
+        The functional choice of how to add sources into the couplings is by no means unique. The
+        choice below yields contributions of roughly the same order of magnitude in norm.
+        """
+        bsz, num_spins, dim, J = h.size(0), h.size(1), h.size(2), self._J
+        J = repeat(J, 'i j -> b i j', b=bsz)
+        if self.J_add_external:
+            J = J + torch.tanh(torch.einsum('b i f, f g, b j g -> b i j', h, self._J_ext, h) / np.sqrt(num_spins*dim))
         if self.J_symmetric:
-            J = 0.5 * (J + J.t())
+            J = 0.5 * (J + J.permute(0, 2, 1))
         if self.J_traceless:
-            mask = torch.eye(num_spins, device=J.device, dtype=J.dtype)
+            mask = batch_eye(bsz, num_spins, device=J.device, dtype=J.dtype)
             J = (1.0 - mask) * J
         return J
 
@@ -80,13 +93,17 @@ class VectorSpinModel(nn.Module):
         """Construct `V` and its inverse given `t` and couplings `J`."""
         assert t.ndim == 2, f'Tensor `t` should have either shape (batch, 1) or (batch, N) but found shape {t.shape}'
         t = t.repeat(1, self.num_spins) if t.size(-1) == 1 else t
-        V = torch.diag_embed(t) - repeat(J, 'i j -> b i j', b=t.size(0))
+        V = torch.diag_embed(t) - J
         V_inv = torch.linalg.solve(V, batch_eye_like(V))
         return t, V, V_inv
 
     def _phi(self, t, h, beta=None, J=None):
-        """Compute `phi` given partition function parameters."""
-        beta, J = default(beta, self.beta), default(J, self.J())
+        """Compute `phi` given partition function parameters.
+
+        For every example in the batch, scalar `t` gets broadcasted to a vector,
+        e.g. identical auxiliary variables for every spin.
+        """
+        beta, J = default(beta, self.beta), default(J, self.J(h))
         t, V, V_inv = self._phi_prep(t, J)
         return (
             beta * t.sum(-1) - 0.5 * torch.logdet(V)
@@ -94,21 +111,18 @@ class VectorSpinModel(nn.Module):
         )[:, None]
 
     def _grad_t_phi(self, t, h, beta=None, J=None):
-        """Compute gradient of `phi` with respect to auxiliary variables `t`."""
-        beta, J = default(beta, self.beta), default(J, self.J())
+        """Compute gradient of `phi` with respect to auxiliary variables `t`.
+
+        For every example in the batch, scalar `t` gets broadcasted to a vector,
+        e.g. identical auxiliary variables for every spin. So instead of a Jacobian,
+        we have a simple scalar value.
+        """
+        beta, J = default(beta, self.beta), default(J, self.J(h))
         _, _, V_inv = self._phi_prep(t, J)
-        if t.size(-1) == 1:
-            # scalar t broadcasted to vector t (identical auxiliaries for every spin)
-            return (
-                beta * self.num_spins - 0.5 * torch.diagonal(V_inv, dim1=-2, dim2=-1).sum(-1)
-                - beta / (4.0 * self.dim) * torch.einsum('b i f, b j f, b i k, b k j -> b', h, h, V_inv, V_inv)
-            )[:, None]
-        else:
-            # vector t (different auxiliaries for every spin): very unstable and doesn't really seem to work
-            return (
-                beta * torch.ones_like(t) - 0.5 * torch.diagonal(V_inv, dim1=-2, dim2=-1)
-                - beta / (4.0 * self.dim) * torch.einsum('b k f, b l f, b i k, b l i -> b i', h, h, V_inv, V_inv)
-            )
+        return (
+            beta * self.num_spins - 0.5 * torch.diagonal(V_inv, dim1=-2, dim2=-1).sum(-1)
+            - beta / (4.0 * self.dim) * torch.einsum('b i f, b j f, b i k, b k j -> b', h, h, V_inv, V_inv)
+        )[:, None]
 
     def approximate_log_Z(self, t, h, beta=None):
         beta = default(beta, self.beta)

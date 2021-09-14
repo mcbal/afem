@@ -7,6 +7,10 @@ from .utils import filter_kwargs, remove_kwargs
 
 
 class RootFind(nn.Module):
+    """Differentiable root-solving using implicit differentiation. 
+
+    See https://implicit-layers-tutorial.org/introduction/ and https://github.com/locuslab/deq.
+    """
     _default_kwargs = {
         'solver_fwd_max_iter': 30,
         'solver_fwd_tol': 1e-4,

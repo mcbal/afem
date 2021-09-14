@@ -1,20 +1,35 @@
-# Basic Newton method for finding roots in k variables.
-#
-# Requires adding `create_graph=True` in backward hook of forward pass of
-# `rootfind.RootFind` to get Jacobian of gradient function. Also possible
-# to pass along an analytical expression for the Jacobian via `jac_f`.
-
 import torch
 
 from .utils import batch_jacobian
 
 
-def newton(f, z_init, jac_f=None, max_iter=40, tol=1e-4):
+def _reset_singular_jacobian(x):
+    """Check for singular scalars/matrices in batch; reset singular scalars/matrices to ones."""
+    bad_idxs = torch.isclose(x, torch.zeros_like(
+        x)) if x.size(-1) == 1 else torch.isclose(torch.det(x), torch.zeros_like(x))
+    if bad_idxs.any():
+        print(
+            f'🔔 Encountered {bad_idxs.sum()} singular Jacobian(s) in current batch during root-finding. Jumping to somewhere else.'
+        )
+        x[bad_idxs] = 1.0
+    return x
+
+
+def newton(f, z_init, analytical_jac_f=None, max_iter=40, tol=1e-4):
+    """Basic Newton method for finding roots in k variables.
+
+    Requires adding `create_graph=True` in backward hook of forward pass of
+    `rootfind.RootFind` to get Jacobian of gradient function. This can be avoided
+    if an analytical expression for the Jacobian is available, which can be passed
+    along to the solver via the `analytical_jac_f` argument.
+
+    See https://implicit-layers-tutorial.org/introduction/.
+    """
     def jacobian(f, z):
-        return jac_f(z) if jac_f is not None else batch_jacobian(f, z)
+        return analytical_jac_f(z) if analytical_jac_f is not None else batch_jacobian(f, z)
 
     def g(z):
-        return z - torch.linalg.solve(jacobian(f, z), f(z))
+        return z - torch.linalg.solve(_reset_singular_jacobian(jacobian(f, z)), f(z))
 
     z_prev, z, n_steps, trace = z_init, g(z_init), 0, []
 
