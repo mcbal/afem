@@ -11,6 +11,7 @@ def _reset_singular_jacobian(x):
         print(
             f'🔔 Encountered {bad_idxs.sum()} singular Jacobian(s) in current batch during root-finding. Jumping to somewhere else.'
         )
+        breakpoint()
         x[bad_idxs] = 1.0
     return x
 
@@ -29,14 +30,24 @@ def newton(f, z_init, analytical_jac_f=None, max_iter=40, tol=1e-4):
         return analytical_jac_f(z) if analytical_jac_f is not None else batch_jacobian(f, z)
 
     def g(z):
-        return z - torch.linalg.solve(_reset_singular_jacobian(jacobian(f, z)), f(z))
+        kaka = _reset_singular_jacobian(jacobian(f, z))
+        # print(kaka)
+        bla = torch.linalg.solve(kaka, f(z))
+        # print('inside g', z, bla, f(z))
+        return z - bla
 
     z_prev, z, n_steps, trace = z_init, g(z_init), 0, []
+
+    trace.append(torch.linalg.norm(f(z_init)).detach())
+    trace.append(torch.linalg.norm(f(z)).detach())
 
     while torch.linalg.norm(z_prev - z) > tol and n_steps < max_iter:
         z_prev, z = z, g(z)
         n_steps += 1
         trace.append(torch.linalg.norm(f(z)).detach())
+
+    # print(z_init, trace, z)
+    # print(trace)
 
     return {
         'result': z,

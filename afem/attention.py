@@ -44,11 +44,17 @@ class VectorSpinAttention(nn.Module):
 
         self.post_norm = norm_class(dim) if post_norm else nn.Identity()
 
-    def forward(self, x, t0=0.5):
+    def forward(self, x, t0=0.5, return_magnetizations=True):
         h = self.pre_norm(x)
 
-        afe, t_star, responses = self.spin_model(h, t0=t0, return_magnetizations=True)
+        if return_magnetizations:
+            afe, t_star, magnetizations = self.spin_model(h, t0=t0, return_magnetizations=return_magnetizations)
 
-        responses = self.post_norm(responses)
+            magnetizations = self.post_norm(magnetizations)
 
-        return responses, afe, t_star
+            return magnetizations, afe, t_star
+
+        else:
+            afe, t_star = self.spin_model(h, t0=t0, return_magnetizations=return_magnetizations)
+
+            return afe, t_star

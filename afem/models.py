@@ -66,9 +66,9 @@ class VectorSpinModel(nn.Module):
         self.diff_root_finder = RootFind(
             self._grad_t_phi,
             newton,
-            solver_fwd_max_iter=50,
+            solver_fwd_max_iter=10,
             solver_fwd_tol=1e-5,
-            solver_bwd_max_iter=50,
+            solver_bwd_max_iter=10,
             solver_bwd_tol=1e-5,
         )
 
@@ -81,7 +81,10 @@ class VectorSpinModel(nn.Module):
         bsz, num_spins, dim, J = h.size(0), h.size(1), h.size(2), self._J
         J = repeat(J, 'i j -> b i j', b=bsz)
         if self.J_add_external:
-            J = J + torch.tanh(torch.einsum('b i f, f g, b j g -> b i j', h, self._J_ext, h) / np.sqrt(num_spins*dim))
+            ext = torch.tanh(torch.einsum('b i f, f g, b j g -> b i j',
+                                          h, self._J_ext, h) / np.sqrt(num_spins*dim))
+            print(torch.linalg.norm(J), torch.linalg.norm(ext))
+            J = J + ext
         if self.J_symmetric:
             J = 0.5 * (J + J.permute(0, 2, 1))
         if self.J_traceless:
@@ -94,6 +97,10 @@ class VectorSpinModel(nn.Module):
         assert t.ndim == 2, f'Tensor `t` should have either shape (batch, 1) or (batch, N) but found shape {t.shape}'
         t = t.repeat(1, self.num_spins) if t.size(-1) == 1 else t
         V = torch.diag_embed(t) - J
+
+        # print(t, torch.eig(V[0]).eigenvalues, torch.det(V[0]))
+        # breakpoint()
+
         V_inv = torch.linalg.solve(V, batch_eye_like(V))
         return t, V, V_inv
 
@@ -105,10 +112,16 @@ class VectorSpinModel(nn.Module):
         """
         beta, J = default(beta, self.beta), default(J, self.J(h))
         t, V, V_inv = self._phi_prep(t, J)
-        return (
-            beta * t.sum(-1) - 0.5 * torch.logdet(V)
+        # print(
+        #     t[0][0],
+        #     torch.linalg.norm(beta * t.sum(dim=-1)[0]),
+        #     torch.linalg.norm(0.5 * torch.logdet(V)[0]),
+        #     torch.linalg.norm(beta / (4.0 * self.dim) * torch.einsum('b i f, b i j, b j f -> b', h, V_inv, h)[0]),)
+        kak = (
+            beta * t.sum(dim=-1) - 0.5 * torch.logdet(V)
             + beta / (4.0 * self.dim) * torch.einsum('b i f, b i j, b j f -> b', h, V_inv, h)
         )[:, None]
+        return kak
 
     def _grad_t_phi(self, t, h, beta=None, J=None):
         """Compute gradient of `phi` with respect to auxiliary variables `t`.
@@ -119,10 +132,16 @@ class VectorSpinModel(nn.Module):
         """
         beta, J = default(beta, self.beta), default(J, self.J(h))
         _, _, V_inv = self._phi_prep(t, J)
-        return (
-            beta * self.num_spins - 0.5 * torch.diagonal(V_inv, dim1=-2, dim2=-1).sum(-1)
+        kak = (
+            beta * self.num_spins - 0.5 * torch.diagonal(V_inv, dim1=-2, dim2=-1).sum(dim=-1)
             - beta / (4.0 * self.dim) * torch.einsum('b i f, b j f, b i k, b k j -> b', h, h, V_inv, V_inv)
         )[:, None]
+
+        # print('J', J, torch.norm(J))
+        # print('Vinv', V_inv)
+        # print('h term', - beta / (4.0 * self.dim) * torch.einsum('b i f, b j f, b i k, b k j -> b', h, h, V_inv, V_inv))
+
+        return kak
 
     def approximate_log_Z(self, t, h, beta=None):
         beta = default(beta, self.beta)
@@ -136,6 +155,34 @@ class VectorSpinModel(nn.Module):
         with respect to gradient-requiring parameters (careful for implicit dependencies when
         evaluating `t` away from the stationary point where phi'(t*) != 0).
         """
+
+        # with torch.no_grad():
+        #     import matplotlib.pyplot as plt
+
+        #     def filter_array(a, threshold=1e2):
+        #         idx = np.where(np.abs(a) > threshold)
+        #         a[idx] = np.nan
+        #         return a
+        #     # Pick a range and resolution for `t`.
+        #     t_range = torch.arange(0.0, 3.0, 0.001)[:, None]
+        #     # Calculate function evaluations for every point on grid and plot.
+        #     out = np.array(self._phi(t_range, h[:1, :, :].repeat(t_range.numel(), 1, 1)).detach().numpy())
+        #     out_grad = np.array(self._grad_t_phi(
+        #         t_range, h[:1, :, :].repeat(t_range.numel(), 1, 1)).detach().numpy())
+        #     f, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+        #     ax1.set_title(f"(Hopefully) Found root of phi'(t) at t = {t[0][0].detach().numpy()}")
+        #     ax1.plot(t_range.numpy().squeeze(), filter_array(out), 'r-')
+        #     ax1.axvline(x=t[0].detach().numpy())
+        #     ax1.set_ylabel("phi(t)")
+        #     ax2.plot(t_range.numpy().squeeze(), filter_array(out_grad), 'r-')
+        #     ax2.axvline(x=t[0].detach().numpy())
+        #     ax2.axhline(y=0.0)
+        #     ax2.set_xlabel('t')
+        #     ax2.set_ylabel("phi'(t)")
+        # #     # plt.show()
+        #     from datetime import datetime
+        #     plt.savefig(f'{datetime.now()}.png')
+
         return -1.0 / beta * self.approximate_log_Z(t, h, beta=beta)
 
     def internal_energy(self, t, h, beta, detach=False):
@@ -172,7 +219,7 @@ class VectorSpinModel(nn.Module):
         self,
         h,
         beta=None,
-        t0=0.5,
+        t0=1.0,
         return_magnetizations=False,
         detach_magnetizations=False,
         return_internal_energy=False,

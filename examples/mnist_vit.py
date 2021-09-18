@@ -57,7 +57,7 @@ def test(model, device, test_loader):
 
 
 class MNISTNet(nn.Module):
-    def __init__(self, dim=96, dim_conv=32, num_spins=16+1):
+    def __init__(self, dim=64, dim_conv=32, num_spins=16+32+1):
         super(MNISTNet, self).__init__()
 
         self.to_patch_embedding = nn.Sequential(
@@ -70,13 +70,18 @@ class MNISTNet(nn.Module):
             Rearrange('b c h w -> b (h w) c'),  # -> (4 x 4) x dim_conv
             nn.Linear(dim_conv, dim),  # -> (4 x 4) x dim
         )
-        self.attention = VectorSpinAttention(num_spins=num_spins, dim=dim, pre_norm=True, post_norm=True)
+        self.cls_token = nn.Parameter(torch.randn(1, 32, dim))
+        self.attention = VectorSpinAttention(num_spins=num_spins, dim=dim, post_norm=True)
         self.final = nn.Linear(dim, 10)
 
     def forward(self, x):
         x = self.to_patch_embedding(x)
+        # x = torch.cat((x, torch.zeros((x.shape[0], 1, x.shape[-1]))), dim=1)
+        cls_tokens = self.cls_token.repeat(x.shape[0], 1, 1)
+        x = torch.cat((x, cls_tokens), dim=1)  # THIS WAS FLIPPED AROUND !!!!
         x = torch.cat((x, torch.zeros((x.shape[0], 1, x.shape[-1]))), dim=1)
-        x = self.attention(x)[0]
+        x = self.attention(x, t0=0.5)[0]
+
         return self.final(x[:, -1, :])
 
 
@@ -104,7 +109,7 @@ def main():
         f'\n✨ Initialized {model.__class__.__name__} ({sum(p.nelement() for p in model.parameters())} params) on {device}.'
     )  # number of model parameters may be an overestimate if weights are made symmetric/traceless inside model
 
-    optimizer = optim.Adam(model.parameters(), lr=3e-4)
+    optimizer = optim.Adam(model.parameters(), lr=5e-4)
 
     for epoch in range(1, 30 + 1):
         train(model, device, train_loader, optimizer, epoch)

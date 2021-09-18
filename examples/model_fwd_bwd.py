@@ -21,7 +21,7 @@ attention = VectorSpinAttention(
 x = torch.randn(1, num_spins, dim).requires_grad_()
 
 # Run forward pass and get responses, approximate free energy, and stationary t_star value.
-responses, afe, t_star = attention(x)
+responses, afe, t_star = attention(x, t0=1.0/np.sqrt(num_spins*dim))
 
 print(f'✨ afe / N: {afe.item()/num_spins:.4f}, \n✨ t_star {t_star.item():.4f}, \n✨ responses: {responses}')
 
@@ -40,7 +40,7 @@ def filter_array(a, threshold=1e2):
 
 
 # Pick a range and resolution for `t`.
-t_range = torch.arange(0.0, 3.0, 0.001)[:, None]
+t_range = torch.arange(0.0, 3.0, 0.0001)[:, None]
 # Calculate function evaluations for every point on grid and plot.
 out = np.array(attention.spin_model._phi(t_range, x[:1, :, :].repeat(t_range.numel(), 1, 1)).detach().numpy())
 out_grad = np.array(attention.spin_model._grad_t_phi(
