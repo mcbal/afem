@@ -8,7 +8,31 @@ from afem.models import VectorSpinModel
 
 
 class TestAnalyticalGradients(unittest.TestCase):
-    def test_phi_t(self):
+    # def test_phi_t(self):
+    #     num_spins, dim = 11, 17
+
+    #     for J_add_external in [True, False]:
+    #         for J_symmetric in [True, False]:
+    #             with self.subTest(J_add_external=J_add_external, J_symmetric=J_symmetric):
+    #                 model = VectorSpinModel(
+    #                     num_spins=num_spins,
+    #                     dim=dim,
+    #                     beta=1.0,
+    #                     J_add_external=J_add_external,
+    #                     J_symmetric=J_symmetric,
+    #                 ).double()
+
+    #                 h = torch.randn(1, num_spins, dim).double()
+    #                 t0 = torch.rand(1, 1).double().requires_grad_()
+
+    #                 analytical_grad = model._grad_t_phi(t0, h)
+    #                 numerical_grad = torch.autograd.grad(model._phi(t0, h), t0)[0]
+
+    #                 self.assertTrue(
+    #                     torch.allclose(analytical_grad, numerical_grad)
+    #                 )
+
+    def test_phi_t_vector(self):
         num_spins, dim = 11, 17
 
         for J_add_external in [True, False]:
@@ -23,7 +47,7 @@ class TestAnalyticalGradients(unittest.TestCase):
                     ).double()
 
                     h = torch.randn(1, num_spins, dim).double()
-                    t0 = torch.rand(1, 1).double().requires_grad_()
+                    t0 = torch.rand(1, num_spins).double().requires_grad_()
 
                     analytical_grad = model._grad_t_phi(t0, h)
                     numerical_grad = torch.autograd.grad(model._phi(t0, h), t0)[0]

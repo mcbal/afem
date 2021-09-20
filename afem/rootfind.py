@@ -45,12 +45,10 @@ class RootFind(nn.Module):
             fun_bwd = self.fun(z_bwd, x, *args, **remove_kwargs(kwargs, 'solver_'))
 
             def backward_hook(grad):
-                aa = self.solver(
+                return self.solver(
                     lambda y: autograd.grad(fun_bwd, z_bwd, y, retain_graph=True, create_graph=True)[0] + grad,
                     torch.zeros_like(grad), **filter_kwargs(kwargs, 'solver_bwd_')
                 )['result']
-                # print('back', grad)
-                return aa
 
             new_z_root.register_hook(backward_hook)
 
