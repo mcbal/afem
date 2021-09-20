@@ -52,9 +52,9 @@ class RootFind(nn.Module):
                 # print('back', grad)
                 return aa
 
-            z_root.register_hook(backward_hook)
+            new_z_root.register_hook(backward_hook)
 
-        return z_root
+        return new_z_root
 
     def forward(self, z0, x, *args, **kwargs):
         return self._root_find(z0, x, *args, **{**self.kwargs, **kwargs})
