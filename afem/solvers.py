@@ -11,11 +11,11 @@ def _reset_singular_jacobian(x):
         print(
             f'🔔 Encountered {bad_idxs.sum()} singular Jacobian(s) in current batch during root-finding. Jumping to somewhere else.'
         )
-        x[bad_idxs] = 1.0
+        x[bad_idxs] = float('NaN')
     return x
 
 
-def newton(f, z_init, analytical_jac_f=None, max_iter=40, tol=1e-4):
+def newton(f, z_init, grad_f=None, max_iter=40, tol=1e-4):
     """Basic Newton method for finding roots in k variables.
 
     Requires adding `create_graph=True` in backward hook of forward pass of
@@ -26,7 +26,7 @@ def newton(f, z_init, analytical_jac_f=None, max_iter=40, tol=1e-4):
     See https://implicit-layers-tutorial.org/introduction/.
     """
     def jacobian(f, z):
-        return analytical_jac_f(z) if analytical_jac_f is not None else batch_jacobian(f, z)
+        return grad_f(z) if grad_f is not None else batch_jacobian(f, z)
 
     def g(z):
         return z - torch.linalg.solve(_reset_singular_jacobian(jacobian(f, z)), f(z))

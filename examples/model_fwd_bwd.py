@@ -19,9 +19,10 @@ attention = VectorSpinAttention(
 )
 
 x = torch.randn(1, num_spins, dim).requires_grad_()
+t0 = torch.ones(1).requires_grad_()  # scalar t
 
 # Run forward pass and get responses, approximate free energy, and stationary t_star value.
-responses, afe, t_star = attention(x, t0=1.0)
+responses, afe, t_star = attention(x, t0=t0)
 
 print(f'✨ afe / N: {afe.item()/num_spins:.4f}, \n✨ t_star {t_star}, \n✨ responses: {responses}')
 

@@ -64,8 +64,7 @@ class VectorSpinModel(nn.Module):
 
         # Initialize implicit layer for differentiable root-finding.
         self.diff_root_finder = RootFind(
-            self._grad_t_phi,
-            newton,
+            self._jac_phi,
             solver_fwd_max_iter=30,
             solver_fwd_tol=1e-5,
             solver_bwd_max_iter=30,
@@ -111,7 +110,7 @@ class VectorSpinModel(nn.Module):
             + beta / (4.0 * self.dim) * torch.einsum('b i f, b i j, b j f -> b', h, V_inv, h)
         )[:, None]
 
-    def _grad_t_phi(self, t, h, beta=None, J=None):
+    def _jac_phi(self, t, h, beta=None, J=None):
         """Compute gradient of `phi` with respect to auxiliary variables `t`.
 
         For every example in the batch, scalar `t` gets broadcasted to a vector,
@@ -123,13 +122,42 @@ class VectorSpinModel(nn.Module):
         if t.size(-1) == 1:
             return (
                 beta * self.num_spins - 0.5 * torch.diagonal(V_inv, dim1=-2, dim2=-1).sum(dim=-1)
-                - beta / (4.0 * self.dim) * torch.einsum('b i f, b j f, b i k, b k j -> b', h, h, V_inv, V_inv)
-            )[:, None]
+                - beta / (4.0 * self.dim) * torch.einsum('b j i, b j f, b k f, b i k -> b', V_inv, h, h, V_inv)
+            )[:, None]  # scalar t (same auxiliary variables for every spin)
         else:
-            # vector t (different auxiliaries for every spin)
             return (
                 beta * torch.ones_like(t) - 0.5 * torch.diagonal(V_inv, dim1=-2, dim2=-1)
-                - beta / (4.0 * self.dim) * torch.einsum('b k f, b l f, b i k, b l i -> b i', h, h, V_inv, V_inv)
+                - beta / (4.0 * self.dim) * torch.einsum('b j i, b j f, b k f, b i k -> b i', V_inv, h, h, V_inv)
+            )  # vector t (different auxiliary variables for every spin)
+
+    def _hess_phi(self, t, h, beta=None, J=None):
+        """Compute (symmetric) Hessian of `phi` with respect to auxiliary variables `t`.
+
+        For every example in the batch, scalar `t` gets broadcasted to a vector,
+        e.g. identical auxiliary variables for every spin. So instead of a Jacobian,
+        we have a simple scalar value.
+        """
+        beta, J = default(beta, self.beta), default(J, self.J(h))
+        _, _, V_inv = self._phi_prep(t, J)
+        if t.size(-1) == 1:
+            return (
+                0.5 * torch.einsum(
+                    'b i j, b j i -> b', V_inv, V_inv)
+                + beta / (4.0 * self.dim) * torch.einsum(
+                    'b k i, b k f, b l f, b j l, b i j -> b', V_inv, h, h, V_inv, V_inv)
+                + beta / (4.0 * self.dim) * torch.einsum(
+                    'b j i, b l j, b l f, b k f, b i k -> b', V_inv, V_inv, h, h, V_inv)
+            )[:, None]
+        else:
+            return (
+                0.5 * torch.einsum(
+                    'b i j, b j i -> b i j', V_inv, V_inv)
+                + torch.diag_embed(
+                    beta / (4.0 * self.dim) * torch.einsum(
+                        'b k i, b k f, b l f, b j l, b i j -> b i', V_inv, h, h, V_inv, V_inv)
+                    + beta / (4.0 * self.dim) * torch.einsum(
+                        'b j i, b l j, b l f, b k f, b i k -> b i', V_inv, V_inv, h, h, V_inv)
+                )
             )
 
     def approximate_log_Z(self, t, h, beta=None):
@@ -187,12 +215,13 @@ class VectorSpinModel(nn.Module):
     def forward(
         self,
         h,
+        t0,
         beta=None,
-        t0=1.0,
         return_magnetizations=False,
         detach_magnetizations=False,
         return_internal_energy=False,
         detach_internal_energy=False,
+        solver_analytic_jac=True,
     ):
         """Probe model with data `h` and return free energy. Optionally returns (detached) responses."""
         beta = default(beta, self.beta)
@@ -200,9 +229,8 @@ class VectorSpinModel(nn.Module):
             h.requires_grad_()
 
         # Find t-value for which `phi` appearing in exponential in partition function is stationary.
-        t_star = self.diff_root_finder(
-            t0*torch.ones(h.size(0), self.num_spins, device=h.device, dtype=h.dtype), h, beta=beta,
-        )
+        t0 = repeat(t0, 'i -> b i', b=h.size(0))
+        t_star = self.diff_root_finder(t0, h, beta=beta, solver_fwd_grad_f=(lambda t: self._hess_phi(t, h, beta=beta)))
 
         # Compute approximate free energy.
         afe = self.approximate_free_energy(t_star, h, beta=beta)

@@ -18,9 +18,9 @@ class RootFind(nn.Module):
         'solver_bwd_tol': 1e-4,
     }
 
-    def __init__(self, fun, solver=newton, **kwargs):
+    def __init__(self, f, solver=newton, **kwargs):
         super().__init__()
-        self.fun = fun
+        self.f = f
         self.solver = solver
         self.kwargs = self._default_kwargs
         self.kwargs.update(**kwargs)
@@ -30,7 +30,7 @@ class RootFind(nn.Module):
         # Compute forward pass: find root of function outside autograd tape.
         with torch.no_grad():
             z_root = self.solver(
-                lambda z: self.fun(z, x, *args, **remove_kwargs(kwargs, 'solver_')),
+                lambda z: self.f(z, x, *args, **remove_kwargs(kwargs, 'solver_')),
                 z0,
                 **filter_kwargs(kwargs, 'solver_fwd_'),
             )['result']
@@ -38,17 +38,24 @@ class RootFind(nn.Module):
 
         if self.training:
             # Re-engage autograd tape (no-op in terms of value of z).
-            new_z_root = z_root.requires_grad_() + self.fun(z_root.requires_grad_(), x, *args, **remove_kwargs(kwargs, 'solver_'))
+            new_z_root = z_root.requires_grad_() - self.f(z_root.requires_grad_(), x, *args, **remove_kwargs(kwargs, 'solver_'))
 
-            # Set up backward hook for root-solving in backward pass.
+            # Set up backward hook for solving of linear system in backward pass.
             z_bwd = new_z_root.clone().detach().requires_grad_()
-            fun_bwd = self.fun(z_bwd, x, *args, **remove_kwargs(kwargs, 'solver_'))
 
-            def backward_hook(grad):
-                return self.solver(
-                    lambda y: autograd.grad(fun_bwd, z_bwd, y, retain_graph=True, create_graph=True)[0] + grad,
-                    torch.zeros_like(grad), **filter_kwargs(kwargs, 'solver_bwd_')
-                )['result']
+            if kwargs.get('solver_fwd_grad_f') is not None:
+                jac_bwd = kwargs['solver_fwd_grad_f'](z_bwd)
+
+                def backward_hook(grad):
+                    return torch.linalg.solve(jac_bwd, grad)
+            else:
+                f_bwd = self.f(z_bwd, x, *args, **remove_kwargs(kwargs, 'solver_'))
+
+                def backward_hook(grad):
+                    return self.solver(
+                        lambda y: autograd.grad(f_bwd, z_bwd, y, retain_graph=True, create_graph=True)[0] + grad,
+                        torch.zeros_like(grad), **filter_kwargs(kwargs, 'solver_bwd_')
+                    )['result']
 
             new_z_root.register_hook(backward_hook)
 
