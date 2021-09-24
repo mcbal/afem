@@ -106,10 +106,10 @@ class TestAnalyticalGradients(unittest.TestCase):
 
 
 class TestRootFindingGradients(unittest.TestCase):
-    def test_vector_spin_model_forward_afe(self):
+    def test_vector_spin_model_afe(self):
         num_spins, dim = 11, 17
 
-        for J_add_external in [False]:
+        for J_add_external in [True, False]:
             for J_symmetric in [True, False]:
                 with self.subTest(J_add_external=J_add_external, J_symmetric=J_symmetric):
                     model = VectorSpinModel(
@@ -120,7 +120,7 @@ class TestRootFindingGradients(unittest.TestCase):
                         J_symmetric=J_symmetric,
                     ).double()
 
-                    x = torch.randn(3, num_spins, dim).double()
+                    x = torch.randn(1, num_spins, dim).double()
                     t0 = torch.ones(num_spins).double().requires_grad_()
 
                     self.assertTrue(
@@ -133,59 +133,32 @@ class TestRootFindingGradients(unittest.TestCase):
                         )
                     )
 
-    # def test_vector_spin_model_forward_afe(self):
-    #     num_spins, dim = 11, 17
+    def test_vector_spin_model_magnetizations(self):
+        num_spins, dim = 11, 17
 
-    #     for J_add_external in [False]:
-    #         for J_symmetric in [True]:
-    #             with self.subTest(J_add_external=J_add_external, J_symmetric=J_symmetric):
-    #                 model = VectorSpinModel(
-    #                     num_spins=num_spins,
-    #                     dim=dim,
-    #                     beta=1.0,
-    #                     J_add_external=J_add_external,
-    #                     J_symmetric=J_symmetric,
-    #                 ).double()
+        for J_add_external in [True, False]:
+            for J_symmetric in [True, False]:
+                with self.subTest(J_add_external=J_add_external, J_symmetric=J_symmetric):
+                    model = VectorSpinModel(
+                        num_spins=num_spins,
+                        dim=dim,
+                        beta=1.0,
+                        J_add_external=J_add_external,
+                        J_symmetric=J_symmetric,
+                    ).double()
 
-    #                 x = torch.randn(3, num_spins, dim).double()
-    #                 t0 = torch.ones(num_spins).double().requires_grad_()
+                    x = torch.randn(1, num_spins, dim).double()
+                    t0 = torch.ones(num_spins).double().requires_grad_()
 
-    #                 self.assertTrue(
-    #                     gradcheck(
-    #                         lambda x: model(x, t0, solver_fwd_analytic_jac=True)[0],
-    #                         x.requires_grad_(),
-    #                         eps=1e-5,
-    #                         atol=1e-4,
-    #                         check_undefined_grad=False,
-    #                     )
-    #                 )
-
-    #     def test_vector_spin_model_forward_responses(self):
-    #         num_spins, dim = 11, 17
-
-    #         for J_add_external in [True, False]:
-    #             for J_symmetric in [True, False]:
-    #                 with self.subTest(J_add_external=J_add_external, J_symmetric=J_symmetric):
-    #                     model = VectorSpinModel(
-    #                         num_spins=num_spins,
-    #                         dim=dim,
-    #                         beta=1.0,
-    #                         J_add_external=J_add_external,
-    #                         J_symmetric=J_symmetric,
-    #                     ).double()
-
-    #                     x = torch.randn(1, num_spins, dim).double()
-    #                       t0 = torch.ones(num_spins).double().requires_grad_()
-
-    #                     self.assertTrue(
-    #                         gradcheck(
-    #                             lambda x: model(x, return_magnetizations=True)[2],
-    #                             x.requires_grad_(),
-    #                             eps=1e-5,
-    #                             atol=1e-4,
-    #                             check_undefined_grad=False,
-    #                         )
-    #                     )
+                    self.assertTrue(
+                        gradcheck(
+                            lambda x: model(x, t0, return_magnetizations=True)[2],
+                            x.requires_grad_(),
+                            eps=1e-5,
+                            atol=1e-3,
+                            check_undefined_grad=False,
+                        )
+                    )
 
 
 if __name__ == '__main__':

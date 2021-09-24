@@ -6,16 +6,11 @@ import numpy as np
 from einops import repeat
 
 from .rootfind import RootFind
-from .solvers import newton
 from .utils import default, batch_eye, batch_eye_like, batch_jacobian
 
 
 class VectorSpinModel(nn.Module):
-    """Implementation of vector spin model.
-
-    ✨
-
-    """
+    """Implementation of differentiable steepest-descent approximation of a vector-spin model."""
 
     def __init__(
         self,
@@ -44,20 +39,23 @@ class VectorSpinModel(nn.Module):
         else:
             self.register_buffer('beta', beta)
 
-        # Setup couplings.
+        # Setup couplings (internal and external).
         J = torch.zeros(num_spins, num_spins).normal_(
             0, J_init_std if J_init_std is not None else 1.0 / np.sqrt(num_spins*dim)
         )
         if J_add_external:
-            J_ext = torch.zeros(dim, dim).normal_(0, 1.0 / dim)
+            J_ext_Q = torch.zeros(dim, dim).normal_(0, 1.0 / dim)
+            J_ext_K = torch.zeros(dim, dim).normal_(0, 1.0 / dim)
         if J_parameter:
             self._J = nn.Parameter(J)
             if J_add_external:
-                self._J_ext = nn.Parameter(J_ext)
+                self._J_ext_Q = nn.Parameter(J_ext_Q)
+                self._J_ext_K = nn.Parameter(J_ext_K)
         else:
             self.register_buffer('_J', J)
             if J_add_external:
-                self.register_buffer('_J_ext', J_ext)
+                self.register_buffer('_J_ext_Q', J_ext_Q)
+                self.register_buffer('_J_ext_K', J_ext_K)
         self.J_add_external = J_add_external
         self.J_symmetric = J_symmetric
         self.J_traceless = J_traceless
@@ -72,16 +70,17 @@ class VectorSpinModel(nn.Module):
         )
 
     def J(self, h):
-        """Return coupling matrix.
+        """Return couplings tensor.
 
         The functional choice of how to add sources into the couplings is by no means unique. The
-        choice below yields contributions of roughly the same order of magnitude in norm.
+        choice below, in combination with the weight initializations above. yields contributions
+        of roughly the same order of magnitude in norm.
         """
         bsz, num_spins, dim, J = h.size(0), h.size(1), h.size(2), self._J
         J = repeat(J, 'i j -> b i j', b=bsz)
         if self.J_add_external:
-            J = J + torch.tanh(torch.einsum('b i f, f g, b j g -> b i j',
-                                            h, self._J_ext, h) / np.sqrt(num_spins*dim))
+            J = J + torch.tanh(torch.einsum('b i f, g f, g h, b j h -> b i j',
+                                            h, self._J_ext_Q, self._J_ext_K, h) / np.sqrt(num_spins*dim))
         if self.J_symmetric:
             J = 0.5 * (J + J.permute(0, 2, 1))
         if self.J_traceless:
@@ -98,11 +97,7 @@ class VectorSpinModel(nn.Module):
         return t, V, V_inv
 
     def _phi(self, t, h, beta=None, J=None):
-        """Compute `phi` given partition function parameters.
-
-        For every example in the batch, scalar `t` gets broadcasted to a vector,
-        e.g. identical auxiliary variables for every spin.
-        """
+        """Compute scalar `phi` given partition function parameters."""
         beta, J = default(beta, self.beta), default(J, self.J(h))
         t, V, V_inv = self._phi_prep(t, J)
         return (
@@ -113,9 +108,9 @@ class VectorSpinModel(nn.Module):
     def _jac_phi(self, t, h, beta=None, J=None):
         """Compute gradient of `phi` with respect to auxiliary variables `t`.
 
-        For every example in the batch, scalar `t` gets broadcasted to a vector,
-        e.g. identical auxiliary variables for every spin. So instead of a Jacobian,
-        we have a simple scalar value.
+        For every example in the batch, the vector case with different auxiliary variables
+        for every spin yields a vector whereas the scalar case with identical auxiliary
+        variables for every spin yields just a scalar.
         """
         beta, J = default(beta, self.beta), default(J, self.J(h))
         _, _, V_inv = self._phi_prep(t, J)
@@ -133,9 +128,9 @@ class VectorSpinModel(nn.Module):
     def _hess_phi(self, t, h, beta=None, J=None):
         """Compute (symmetric) Hessian of `phi` with respect to auxiliary variables `t`.
 
-        For every example in the batch, scalar `t` gets broadcasted to a vector,
-        e.g. identical auxiliary variables for every spin. So instead of a Jacobian,
-        we have a simple scalar value.
+        For every example in the batch, the vector case with different auxiliary variables
+        for every spin yields a matrix whereas the scalar case with identical auxiliary
+        variables for every spin yields just a scalar.
         """
         beta, J = default(beta, self.beta), default(J, self.J(h))
         _, _, V_inv = self._phi_prep(t, J)
@@ -147,7 +142,7 @@ class VectorSpinModel(nn.Module):
                     'b k i, b k f, b l f, b j l, b i j -> b', V_inv, h, h, V_inv, V_inv)
                 + beta / (4.0 * self.dim) * torch.einsum(
                     'b j i, b l j, b l f, b k f, b i k -> b', V_inv, V_inv, h, h, V_inv)
-            )[:, None]
+            )[:, None, None]
         else:
             return (
                 0.5 * torch.einsum(
@@ -161,47 +156,26 @@ class VectorSpinModel(nn.Module):
             )
 
     def approximate_log_Z(self, t, h, beta=None):
+        """Compute steepest-descent approximation of log of parition function for large `self.dim`."""
         beta = default(beta, self.beta)
         return 0.5 * self.num_spins * torch.log(math.pi / beta) + self._phi(t, h, beta=beta)
 
-    def loss(self, t, h, beta=None):
-        beta, J = default(beta, self.beta), self.J(h)
-        t, V, V_inv = self._phi_prep(t, J)
-        kaka = (0.5 * torch.logdet(V) - beta / (4.0 * self.dim) * torch.einsum('b i f, b i j, b j f -> b', h, V_inv, h)
-                )[:, None]
-
-        return kaka
-
     def approximate_free_energy(self, t, h, beta=None):
-        """Compute steepest-descent free energy for large `self.dim`.
+        """Compute steepest-descent approximation of free energy for large `self.dim`.
 
         Actually a free energy density since it's divided by `self.dim`". Divide by `self.num_spins`
         to get an average value per site. To calculate thermodynamic quantities, take derivatives
-        with respect to gradient-requiring parameters (careful for implicit dependencies when
-        evaluating `t` away from the stationary point where phi'(t*) != 0).
+        with respect to gradient-requiring parameters. Careful for implicit dependencies when
+        evaluating `t` away from the stationary point where phi'(t*) != 0.
         """
         return -1.0 / beta * self.approximate_log_Z(t, h, beta=beta)
-
-    def internal_energy(self, t, h, beta, detach=False):
-        """Differentiate log(Z) with respect to the sources `beta` to get <E>.
-
-        If evaluated at `t = t_star`, implicit derivative paths via `t_star(h)`
-        drop out because `phi'(t_star) = 0` at the stationary point.
-        """
-        if not beta.requires_grad:
-            beta.requires_grad_()
-        energy = batch_jacobian(
-            lambda z: -self.approximate_log_Z(t, h, beta=z),
-            beta, create_graph=not detach, swapaxes=False)[0]
-        if detach:
-            return energy.detach()
-        return energy
 
     def magnetizations(self, t, h, beta, detach=False):
         """Differentiate log(Z) with respect to the sources `h_i` to get <sigma_i>.
 
         If evaluated at `t = t_star`, implicit derivative paths via `t_star(h)`
-        drop out because `phi'(t_star) = 0` at the stationary point.
+        do not contribute to the values because `phi'(t_star) = 0` at the stationary
+        point, but the gradients still propagate.
         """
         if not h.requires_grad:
             h.requires_grad_()
@@ -212,6 +186,37 @@ class VectorSpinModel(nn.Module):
             return responses.detach()
         return responses
 
+    def internal_energy(self, t, h, beta, detach=False):
+        """Differentiate log(Z) with respect to the sources `beta` to get <E>.
+
+        If evaluated at `t = t_star`, implicit derivative paths via `t_star(beta)`
+        do not contribute to the values because `phi'(t_star) = 0` at the stationary
+        point, but the gradients still propagate.
+        """
+        if not beta.requires_grad:
+            beta.requires_grad_()
+        energy = batch_jacobian(
+            lambda z: -self.approximate_log_Z(t, h, beta=z),
+            beta, create_graph=not detach, swapaxes=False)[0]
+        if detach:
+            return energy.detach()
+        return energy
+
+    def log_prob(self, t, h, beta=None):
+        """Compute log_prob for inputs `h` in the steepest-descent approximation.
+
+        Returns -log[p(h)] = E(h) + log[Z] = - log[Z(h)] + log[integral dh Z(h)]
+        where the first term is the steepest descent approximation and the second
+        term is just a Gaussian integral which ends up cancelling the first term
+        `beta * t.sum(dim=-1)` in `phi`.
+        """
+        beta, J = default(beta, self.beta), self.J(h)
+        t, V, V_inv = self._phi_prep(t, J)
+        return (
+            - 0.5 * torch.logdet(V)
+            + beta / (4.0 * self.dim) * torch.einsum('b i f, b i j, b j f -> b', h, V_inv, h)
+        )[:, None]
+
     def forward(
         self,
         h,
@@ -221,12 +226,8 @@ class VectorSpinModel(nn.Module):
         detach_magnetizations=False,
         return_internal_energy=False,
         detach_internal_energy=False,
-        solver_analytic_jac=True,
     ):
-        """Probe model with data `h` and return free energy. Optionally returns (detached) responses."""
         beta = default(beta, self.beta)
-        if not h.requires_grad:
-            h.requires_grad_()
 
         # Find t-value for which `phi` appearing in exponential in partition function is stationary.
         t0 = repeat(t0, 'i -> b i', b=h.size(0))
