@@ -1,7 +1,19 @@
+from dataclasses import dataclass
+from typing import Optional
+
+import torch
 import torch.nn as nn
 
 from .models import VectorSpinModel
 from .modules import ScaleNorm
+
+
+@dataclass
+class VectorSpinAttentionOutput:
+    afe: torch.Tensor
+    t_star: torch.Tensor
+    magnetizations: Optional[torch.Tensor]
+    internal_energy: Optional[torch.Tensor]
 
 
 class VectorSpinAttention(nn.Module):
@@ -20,8 +32,8 @@ class VectorSpinAttention(nn.Module):
         J_add_external=True,
         J_init_std=None,
         J_parameter=True,
-        J_symmetric=False,
-        J_traceless=False,
+        J_symmetric=True,
+        J_traceless=True,
     ):
         super().__init__()
 
@@ -44,17 +56,32 @@ class VectorSpinAttention(nn.Module):
 
         self.post_norm = norm_class(dim) if post_norm else nn.Identity()
 
-    def forward(self, x, t0=0.5, return_magnetizations=True):
+    def forward(
+            self,
+            x,
+            t0,
+            beta=None,
+            return_magnetizations=True,
+            detach_magnetizations=False,
+            return_internal_energy=False,
+            detach_internal_energy=False,
+    ):
         h = self.pre_norm(x)
 
-        if return_magnetizations:
-            afe, t_star, magnetizations = self.spin_model(h, t0=t0, return_magnetizations=return_magnetizations)
+        out = self.spin_model(
+            h,
+            t0=t0,
+            beta=beta,
+            return_magnetizations=return_magnetizations,
+            detach_magnetizations=detach_magnetizations,
+            return_internal_energy=return_internal_energy,
+            detach_internal_energy=detach_internal_energy,
+        )
+        out
 
-            magnetizations = self.post_norm(magnetizations)
-
-            return magnetizations, afe, t_star
-
-        else:
-            afe, t_star = self.spin_model(h, t0=t0, return_magnetizations=return_magnetizations)
-
-            return afe, t_star
+        return VectorSpinAttentionOutput(
+            afe=out[0],
+            t_star=out[1],
+            magnetizations=self.post_norm(out[2]) if return_magnetizations else None,
+            internal_energy=out[3] if return_internal_energy else None,
+        )
