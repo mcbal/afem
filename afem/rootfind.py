@@ -44,12 +44,10 @@ class RootFind(nn.Module):
             z_root_bwd = new_z_root.clone().detach().requires_grad_()
 
             if kwargs.get('solver_fwd_grad_f') is not None:
-                jac_bwd = kwargs['solver_fwd_grad_f'](z_root_bwd)
-
                 def backward_hook(grad):
-                    return torch.linalg.solve(jac_bwd, grad)
+                    return torch.linalg.solve(kwargs['solver_fwd_grad_f'](z_root_bwd), grad)
             else:
-                f_bwd = self.f(z_root_bwd, x, *args, **remove_kwargs(kwargs, 'solver_'))
+                f_bwd = -self.f(z_root_bwd, x, *args, **remove_kwargs(kwargs, 'solver_'))
 
                 def backward_hook(grad):
                     return self.solver(

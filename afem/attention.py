@@ -65,6 +65,7 @@ class VectorSpinAttention(nn.Module):
             detach_magnetizations=False,
             return_internal_energy=False,
             detach_internal_energy=False,
+            use_analytical_grads=True,
     ):
         h = self.pre_norm(x)
 
@@ -76,8 +77,8 @@ class VectorSpinAttention(nn.Module):
             detach_magnetizations=detach_magnetizations,
             return_internal_energy=return_internal_energy,
             detach_internal_energy=detach_internal_energy,
+            use_analytical_grads=use_analytical_grads,
         )
-        out
 
         return VectorSpinAttentionOutput(
             afe=out[0],

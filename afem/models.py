@@ -44,18 +44,15 @@ class VectorSpinModel(nn.Module):
             0, J_init_std if J_init_std is not None else 1.0 / np.sqrt(num_spins*dim)
         )
         if J_add_external:
-            J_ext_Q = torch.zeros(dim, dim).normal_(0, 1.0 / dim)
-            J_ext_K = torch.zeros(dim, dim).normal_(0, 1.0 / dim)
+            J_ext = torch.zeros(dim, dim).normal_(0, 1.0 / dim)
         if J_parameter:
             self._J = nn.Parameter(J)
             if J_add_external:
-                self._J_ext_Q = nn.Parameter(J_ext_Q)
-                self._J_ext_K = nn.Parameter(J_ext_K)
+                self._J_ext = nn.Parameter(J_ext)
         else:
             self.register_buffer('_J', J)
             if J_add_external:
-                self.register_buffer('_J_ext_Q', J_ext_Q)
-                self.register_buffer('_J_ext_K', J_ext_K)
+                self.register_buffer('_J_ext', J_ext)
         self.J_add_external = J_add_external
         self.J_symmetric = J_symmetric
         self.J_traceless = J_traceless
@@ -79,8 +76,8 @@ class VectorSpinModel(nn.Module):
         bsz, num_spins, dim, J = h.size(0), h.size(1), h.size(2), self._J
         J = repeat(J, 'i j -> b i j', b=bsz)
         if self.J_add_external:
-            J = J + torch.tanh(torch.einsum('b i f, g f, g h, b j h -> b i j',
-                                            h, self._J_ext_Q, self._J_ext_K, h) / np.sqrt(num_spins*dim))
+            J = J + torch.tanh(torch.einsum('b i f, f g, b j g -> b i j',
+                                            h, self._J_ext, h) / np.sqrt(num_spins*dim))
         if self.J_symmetric:
             J = 0.5 * (J + J.permute(0, 2, 1))
         if self.J_traceless:
@@ -226,12 +223,18 @@ class VectorSpinModel(nn.Module):
         detach_magnetizations=False,
         return_internal_energy=False,
         detach_internal_energy=False,
+        use_analytical_grads=True,
     ):
         beta = default(beta, self.beta)
 
         # Find t-value for which `phi` appearing in exponential in partition function is stationary.
         t0 = repeat(t0, 'i -> b i', b=h.size(0))
-        t_star = self.diff_root_finder(t0, h, beta=beta, solver_fwd_grad_f=(lambda t: self._hess_phi(t, h, beta=beta)))
+
+        if use_analytical_grads:
+            t_star = self.diff_root_finder(t0, h, beta=beta, solver_fwd_grad_f=(
+                lambda z: self._hess_phi(z, h, beta=beta)))
+        else:
+            t_star = self.diff_root_finder(t0, h, beta=beta)
 
         # Compute approximate free energy.
         afe = self.approximate_free_energy(t_star, h, beta=beta)
