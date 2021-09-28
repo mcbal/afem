@@ -12,16 +12,16 @@ num_spins, dim = 11, 17
 attention = VectorSpinAttention(
     num_spins=num_spins,
     dim=dim,
+    J_add_external=True,
 )
 
 x = torch.randn(1, num_spins, dim).requires_grad_()
-t0 = torch.ones(1).requires_grad_()  # scalar t
+t0 = torch.ones(1)  # scalar t
 
 # Run forward pass and get responses, approximate free energy, and stationary t_star value.
-out = attention(x, t0=t0, return_magnetizations=True)
+out = attention(x, t0=t0, return_afe=True, return_magnetizations=True, use_analytical_grads=False,)
 
 print(f'✨ afe / N: {out.afe.item()/num_spins:.4f}, \n✨ t_star {out.t_star}, \n✨ magnetizations: {out.magnetizations}')
-
 # Run backward on sum of free energies across batch dimension.
 out.afe.sum().backward()
 

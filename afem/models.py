@@ -1,4 +1,6 @@
 import math
+from dataclasses import dataclass
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -6,7 +8,16 @@ import numpy as np
 from einops import repeat
 
 from .rootfind import RootFind
-from .utils import default, batch_eye, batch_eye_like, batch_jacobian
+from .utils import batch_eye, batch_eye_like, batch_jacobian, default, exists
+
+
+@dataclass
+class VectorSpinModelOutput:
+    afe: torch.Tensor
+    t_star: torch.Tensor
+    magnetizations: Optional[torch.Tensor]
+    internal_energy: Optional[torch.Tensor]
+    log_prob: Optional[torch.Tensor]
 
 
 class VectorSpinModel(nn.Module):
@@ -19,11 +30,11 @@ class VectorSpinModel(nn.Module):
         beta=1.0,
         beta_requires_grad=True,
         beta_parameter=False,
-        J_add_external=False,
         J_init_std=None,
-        J_parameter=True,
+        J_add_external=False,
         J_symmetric=True,
         J_traceless=True,
+        J_parameter=True,
     ):
         super().__init__()
 
@@ -40,11 +51,10 @@ class VectorSpinModel(nn.Module):
             self.register_buffer('beta', beta)
 
         # Setup couplings (internal and external).
-        J = torch.zeros(num_spins, num_spins).normal_(
-            0, J_init_std if J_init_std is not None else 1.0 / np.sqrt(num_spins*dim)
-        )
+        J = torch.empty(num_spins, num_spins).normal_(0.0, J_init_std
+                                                      if exists(J_init_std) else 1.0 / np.sqrt(num_spins * dim))
         if J_add_external:
-            J_ext = torch.zeros(dim, dim).normal_(0, 1.0 / dim)
+            J_ext = torch.empty(dim, dim).uniform_(-1/np.sqrt(dim**2), 1/np.sqrt(dim**2))
         if J_parameter:
             self._J = nn.Parameter(J)
             if J_add_external:
@@ -60,9 +70,9 @@ class VectorSpinModel(nn.Module):
         # Initialize implicit layer for differentiable root-finding.
         self.diff_root_finder = RootFind(
             self._jac_phi,
-            solver_fwd_max_iter=30,
+            solver_fwd_max_iter=40,
             solver_fwd_tol=1e-5,
-            solver_bwd_max_iter=30,
+            solver_bwd_max_iter=40,
             solver_bwd_tol=1e-5,
         )
 
@@ -75,9 +85,21 @@ class VectorSpinModel(nn.Module):
         """
         bsz, num_spins, dim, J = h.size(0), h.size(1), h.size(2), self._J
         J = repeat(J, 'i j -> b i j', b=bsz)
+        # print(torch.linalg.norm(J).item(), torch.linalg.norm(h[0]).item(), 'inside J')
+        # breakpoint()
         if self.J_add_external:
-            J = J + torch.tanh(torch.einsum('b i f, f g, b j g -> b i j',
-                                            h, self._J_ext, h) / np.sqrt(num_spins*dim))
+            inside = torch.einsum('b i f, f g, b j g -> b i j',
+                                  h, self._J_ext, h) / np.sqrt(num_spins*dim)
+            ext = torch.tanh(inside)
+            # print(
+            #     torch.linalg.norm(J).item(),
+            #     torch.linalg.norm(self._J_ext).item(),
+            #     torch.linalg.norm(h[0][0]).item(),
+            #     torch.linalg.norm(inside).item(),
+            #     torch.linalg.norm(ext).item(),
+            # )
+            # print(ext[0])
+            J = J + ext
         if self.J_symmetric:
             J = 0.5 * (J + J.permute(0, 2, 1))
         if self.J_traceless:
@@ -167,7 +189,7 @@ class VectorSpinModel(nn.Module):
         """
         return -1.0 / beta * self.approximate_log_Z(t, h, beta=beta)
 
-    def magnetizations(self, t, h, beta, detach=False):
+    def magnetizations(self, t, h, beta):
         """Differentiate log(Z) with respect to the sources `h_i` to get <sigma_i>.
 
         If evaluated at `t = t_star`, implicit derivative paths via `t_star(h)`
@@ -178,12 +200,10 @@ class VectorSpinModel(nn.Module):
             h.requires_grad_()
         responses = batch_jacobian(
             lambda z: self.approximate_log_Z(t, z, beta=beta),
-            h, create_graph=not detach, swapaxes=False)[0]
-        if detach:
-            return responses.detach()
+            h, create_graph=True, swapaxes=False)[0]
         return responses
 
-    def internal_energy(self, t, h, beta, detach=False):
+    def internal_energy(self, t, h, beta):
         """Differentiate log(Z) with respect to the sources `beta` to get <E>.
 
         If evaluated at `t = t_star`, implicit derivative paths via `t_star(beta)`
@@ -194,9 +214,7 @@ class VectorSpinModel(nn.Module):
             beta.requires_grad_()
         energy = batch_jacobian(
             lambda z: -self.approximate_log_Z(t, h, beta=z),
-            beta, create_graph=not detach, swapaxes=False)[0]
-        if detach:
-            return energy.detach()
+            beta, create_graph=True, swapaxes=False)[0]
         return energy
 
     def log_prob(self, t, h, beta=None):
@@ -209,6 +227,13 @@ class VectorSpinModel(nn.Module):
         """
         beta, J = default(beta, self.beta), self.J(h)
         t, V, V_inv = self._phi_prep(t, J)
+        # vals = torch.linalg.eigvals(V)
+
+        # print(- 0.5 * torch.logdet(V))
+        # print(beta / (4.0 * self.dim) * torch.einsum('b i f, b i j, b j f -> b', h, V_inv, h))
+        # print(h[0])
+        # print(vals)
+        # breakpoint()
         return (
             - 0.5 * torch.logdet(V)
             + beta / (4.0 * self.dim) * torch.einsum('b i f, b i j, b j f -> b', h, V_inv, h)
@@ -219,33 +244,27 @@ class VectorSpinModel(nn.Module):
         h,
         t0,
         beta=None,
-        return_magnetizations=False,
-        detach_magnetizations=False,
+        return_afe=False,
+        return_magnetizations=True,
         return_internal_energy=False,
-        detach_internal_energy=False,
+        return_log_prob=False,
         use_analytical_grads=True,
     ):
         beta = default(beta, self.beta)
-
-        # Find t-value for which `phi` appearing in exponential in partition function is stationary.
         t0 = repeat(t0, 'i -> b i', b=h.size(0))
 
+        # Solve for stationary point of exponential appearing in partition function.
         if use_analytical_grads:
             t_star = self.diff_root_finder(t0, h, beta=beta, solver_fwd_grad_f=(
                 lambda z: self._hess_phi(z, h, beta=beta)))
         else:
             t_star = self.diff_root_finder(t0, h, beta=beta)
 
-        # Compute approximate free energy.
-        afe = self.approximate_free_energy(t_star, h, beta=beta)
-
-        # Prepare for output and calculate responses and energy if requested.
-        out = (afe, t_star,)
-        if return_magnetizations:
-            out += (self.magnetizations(t_star, h, beta=beta, detach=detach_magnetizations),)
-        if return_internal_energy:
-            out += (self.internal_energy(t_star, h, beta=beta, detach=detach_internal_energy),)
-
         # TODO: Add second-order derivatives: specific heat and susceptibilities (fluctuations).
-
-        return out
+        return VectorSpinModelOutput(
+            t_star=t_star,
+            afe=self.approximate_free_energy(t_star, h, beta=beta) if return_afe else None,
+            magnetizations=self.magnetizations(t_star, h, beta=beta) if return_magnetizations else None,
+            internal_energy=self.internal_energy(t_star, h, beta=beta)if return_internal_energy else None,
+            log_prob=self.log_prob(t_star, h) if return_log_prob else None,
+        )

@@ -59,37 +59,37 @@ class TestAnalyticalGradients(unittest.TestCase):
 
 
 class TestRootFindingGradients(unittest.TestCase):
-    # def test_vector_spin_model_afe(self):
-    #     num_spins, dim = 11, 17
+    def test_vector_spin_model_afe(self):
+        num_spins, dim = 11, 17
 
-    #     for (t_vector, use_analytical_grads, J_add_external, J_symmetric) in itertools.product([True, False], repeat=4):
-    #         with self.subTest(
-    #             t_vector=t_vector,
-    #             use_analytical_grads=use_analytical_grads,
-    #             J_add_external=J_add_external,
-    #             J_symmetric=J_symmetric
-    #         ):
-    #             model = VectorSpinModel(
-    #                 num_spins=num_spins,
-    #                 dim=dim,
-    #                 beta=1.0,
-    #                 J_add_external=J_add_external,
-    #                 J_symmetric=J_symmetric,
-    #             ).double()
+        for (t_vector, use_analytical_grads, J_add_external, J_symmetric) in itertools.product([True, False], repeat=4):
+            with self.subTest(
+                t_vector=t_vector,
+                use_analytical_grads=use_analytical_grads,
+                J_add_external=J_add_external,
+                J_symmetric=J_symmetric
+            ):
+                model = VectorSpinModel(
+                    num_spins=num_spins,
+                    dim=dim,
+                    beta=1.0,
+                    J_add_external=J_add_external,
+                    J_symmetric=J_symmetric,
+                ).double()
 
-    #             x = torch.randn(1, num_spins, dim).double()
-    #             t0 = torch.ones(num_spins) if t_vector else torch.ones(1)
-    #             t0 = t0.double().requires_grad_()
+                x = torch.randn(1, num_spins, dim).double()
+                t0 = torch.ones(num_spins) if t_vector else torch.ones(1)
+                t0 = t0.double().requires_grad_()
 
-    #             self.assertTrue(
-    #                 gradcheck(
-    #                     lambda z: model(z, t0, use_analytical_grads=use_analytical_grads)[0],
-    #                     x.requires_grad_(),
-    #                     eps=1e-5,
-    #                     atol=1e-4,
-    #                     check_undefined_grad=False,
-    #                 )
-    #             )
+                self.assertTrue(
+                    gradcheck(
+                        lambda z: model(z, t0, return_afe=True, use_analytical_grads=use_analytical_grads).afe,
+                        x.requires_grad_(),
+                        eps=1e-6,
+                        atol=1e-4,
+                        check_undefined_grad=False,
+                    )
+                )
 
     def test_vector_spin_model_magnetizations(self):
         num_spins, dim = 11, 17
@@ -115,9 +115,9 @@ class TestRootFindingGradients(unittest.TestCase):
 
                 self.assertTrue(
                     gradcheck(
-                        lambda z: model(z, t0, return_magnetizations=True, use_analytical_grads=use_analytical_grads)[2],
+                        lambda z: model(z, t0, return_magnetizations=True, use_analytical_grads=use_analytical_grads).magnetizations,
                         x.requires_grad_(),
-                        eps=1e-5,
+                        eps=1e-6,
                         atol=1e-3,
                         check_undefined_grad=False,
                     )

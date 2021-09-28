@@ -1,19 +1,9 @@
-from dataclasses import dataclass
-from typing import Optional
-
-import torch
+import numpy as np
 import torch.nn as nn
 
 from .models import VectorSpinModel
 from .modules import ScaleNorm
-
-
-@dataclass
-class VectorSpinAttentionOutput:
-    afe: torch.Tensor
-    t_star: torch.Tensor
-    magnetizations: Optional[torch.Tensor]
-    internal_energy: Optional[torch.Tensor]
+from .utils import exists
 
 
 class VectorSpinAttention(nn.Module):
@@ -29,17 +19,15 @@ class VectorSpinAttention(nn.Module):
         beta=1.0,
         beta_requires_grad=False,
         beta_parameter=False,
-        J_add_external=True,
-        J_init_std=None,
-        J_parameter=True,
+        J_add_external=False,
         J_symmetric=True,
         J_traceless=True,
+        J_parameter=True,
     ):
         super().__init__()
 
-        norm_class = ScaleNorm if use_scalenorm else nn.LayerNorm
-
-        self.pre_norm = norm_class(dim) if pre_norm else nn.Identity()
+        self.pre_norm = (ScaleNorm(scale=np.sqrt(dim)) if use_scalenorm else nn.LayerNorm(dim)
+                         ) if pre_norm else nn.Identity()
 
         self.spin_model = VectorSpinModel(
             num_spins=num_spins,
@@ -48,23 +36,23 @@ class VectorSpinAttention(nn.Module):
             beta_requires_grad=beta_requires_grad,
             beta_parameter=beta_parameter,
             J_add_external=J_add_external,
-            J_init_std=J_init_std,
-            J_parameter=J_parameter,
             J_symmetric=J_symmetric,
             J_traceless=J_traceless,
+            J_parameter=J_parameter,
         )
 
-        self.post_norm = norm_class(dim) if post_norm else nn.Identity()
+        self.post_norm = (ScaleNorm(scale=np.sqrt(dim)) if use_scalenorm else nn.LayerNorm(dim)
+                          ) if post_norm else nn.Identity()
 
     def forward(
             self,
             x,
             t0,
             beta=None,
+            return_afe=False,
             return_magnetizations=True,
-            detach_magnetizations=False,
             return_internal_energy=False,
-            detach_internal_energy=False,
+            return_log_prob=False,
             use_analytical_grads=True,
     ):
         h = self.pre_norm(x)
@@ -73,16 +61,13 @@ class VectorSpinAttention(nn.Module):
             h,
             t0=t0,
             beta=beta,
+            return_afe=return_afe,
             return_magnetizations=return_magnetizations,
-            detach_magnetizations=detach_magnetizations,
             return_internal_energy=return_internal_energy,
-            detach_internal_energy=detach_internal_energy,
+            return_log_prob=return_log_prob,
             use_analytical_grads=use_analytical_grads,
         )
 
-        return VectorSpinAttentionOutput(
-            afe=out[0],
-            t_star=out[1],
-            magnetizations=self.post_norm(out[2]) if return_magnetizations else None,
-            internal_energy=out[3] if return_internal_energy else None,
-        )
+        out.magnetizations = self.post_norm(out.magnetizations) if exists(out.magnetizations) else None
+
+        return out
