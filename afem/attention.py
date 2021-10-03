@@ -13,21 +13,20 @@ class VectorSpinAttention(nn.Module):
         self,
         num_spins,
         dim,
-        use_scalenorm=True,
         pre_norm=True,
         post_norm=False,
+        use_scalenorm=True,
         beta=1.0,
         beta_requires_grad=False,
         beta_parameter=False,
         J_add_external=False,
         J_symmetric=True,
         J_traceless=True,
-        J_parameter=True,
     ):
         super().__init__()
 
-        self.pre_norm = (ScaleNorm(scale=np.sqrt(dim)) if use_scalenorm else nn.LayerNorm(dim)
-                         ) if pre_norm else nn.Identity()
+        norm_class, norm_dim = (ScaleNorm, np.sqrt(dim)) if use_scalenorm else (nn.LayerNorm, dim)
+        self.pre_norm = norm_class(norm_dim) if pre_norm else nn.Identity()
 
         self.spin_model = VectorSpinModel(
             num_spins=num_spins,
@@ -38,11 +37,9 @@ class VectorSpinAttention(nn.Module):
             J_add_external=J_add_external,
             J_symmetric=J_symmetric,
             J_traceless=J_traceless,
-            J_parameter=J_parameter,
         )
 
-        self.post_norm = (ScaleNorm(scale=np.sqrt(dim)) if use_scalenorm else nn.LayerNorm(dim)
-                          ) if post_norm else nn.Identity()
+        self.post_norm = norm_class(norm_dim) if post_norm else nn.Identity()
 
     def forward(
             self,

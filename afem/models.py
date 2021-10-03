@@ -34,7 +34,6 @@ class VectorSpinModel(nn.Module):
         J_add_external=False,
         J_symmetric=True,
         J_traceless=True,
-        J_parameter=True,
     ):
         super().__init__()
 
@@ -51,18 +50,14 @@ class VectorSpinModel(nn.Module):
             self.register_buffer('beta', beta)
 
         # Setup couplings (internal and external).
-        J = torch.empty(num_spins, num_spins).normal_(0.0, J_init_std
-                                                      if exists(J_init_std) else 1.0 / np.sqrt(num_spins * dim))
+        self._J = nn.Parameter(torch.empty(num_spins, num_spins).normal_(
+            0.0, J_init_std if exists(J_init_std) else 1.0 / np.sqrt(num_spins * dim)
+        ))
         if J_add_external:
-            J_ext = torch.empty(dim, dim).uniform_(-1/np.sqrt(dim**2), 1/np.sqrt(dim**2))
-        if J_parameter:
-            self._J = nn.Parameter(J)
-            if J_add_external:
-                self._J_ext = nn.Parameter(J_ext)
-        else:
-            self.register_buffer('_J', J)
-            if J_add_external:
-                self.register_buffer('_J_ext', J_ext)
+            # self._J_ext = nn.Parameter(torch.empty(dim, dim).uniform_(-1.0 / np.sqrt(dim**2), 1.0 / np.sqrt(dim**2)))
+            self._J_ext = nn.Parameter(torch.ones(num_spins, num_spins))
+            # self.to_q = nn.Linear(dim, dim, bias=False)
+            # self.to_k = nn.Linear(dim, dim, bias=False)
         self.J_add_external = J_add_external
         self.J_symmetric = J_symmetric
         self.J_traceless = J_traceless
@@ -84,22 +79,34 @@ class VectorSpinModel(nn.Module):
         of roughly the same order of magnitude in norm.
         """
         bsz, num_spins, dim, J = h.size(0), h.size(1), h.size(2), self._J
+
         J = repeat(J, 'i j -> b i j', b=bsz)
+        h = h.detach()
+
         # print(torch.linalg.norm(J).item(), torch.linalg.norm(h[0]).item(), 'inside J')
         # breakpoint()
         if self.J_add_external:
-            inside = torch.einsum('b i f, f g, b j g -> b i j',
-                                  h, self._J_ext, h) / np.sqrt(num_spins*dim)
-            ext = torch.tanh(inside)
-            # print(
-            #     torch.linalg.norm(J).item(),
-            #     torch.linalg.norm(self._J_ext).item(),
-            #     torch.linalg.norm(h[0][0]).item(),
-            #     torch.linalg.norm(inside).item(),
-            #     torch.linalg.norm(ext).item(),
-            # )
-            # print(ext[0])
-            J = J + ext
+            # q, k = self.to_q(h), self.to_k(h)
+            # inside = torch.einsum('b i f, b j f -> b i j', q, k) / np.sqrt(dim**2*num_spins)
+            # ext = torch.tanh(inside)
+            # print(torch.cdist(h, h).shape, self._J_ext.shape)
+            print(self._J_ext**2)
+            # breakpoint()
+            ext = (-0.5 / (self._J_ext**2).unsqueeze(0) * torch.cdist(h/np.sqrt(dim),
+                   h/np.sqrt(dim))).exp() / np.sqrt(num_spins)**2
+            print(
+                torch.linalg.norm(J[0]).item(),
+                torch.linalg.norm(torch.cdist(h/np.sqrt(dim),
+                                              h/np.sqrt(dim))).item(),
+                torch.linalg.norm(ext[0]).item(),
+            )
+            print(ext)
+            # breakpoint()
+            J = J + torch.tanh(ext)
+            print(
+                torch.linalg.norm(J[0]).item(),
+            )
+
         if self.J_symmetric:
             J = 0.5 * (J + J.permute(0, 2, 1))
         if self.J_traceless:
@@ -118,7 +125,10 @@ class VectorSpinModel(nn.Module):
     def _phi(self, t, h, beta=None, J=None):
         """Compute scalar `phi` given partition function parameters."""
         beta, J = default(beta, self.beta), default(J, self.J(h))
+        # print(t)
         t, V, V_inv = self._phi_prep(t, J)
+
+        # print(torch.linalg.eigvals(V))
         return (
             beta * t.sum(dim=-1) - 0.5 * torch.logdet(V)
             + beta / (4.0 * self.dim) * torch.einsum('b i f, b i j, b j f -> b', h, V_inv, h)
@@ -229,8 +239,10 @@ class VectorSpinModel(nn.Module):
         t, V, V_inv = self._phi_prep(t, J)
         # vals = torch.linalg.eigvals(V)
 
-        # print(- 0.5 * torch.logdet(V))
-        # print(beta / (4.0 * self.dim) * torch.einsum('b i f, b i j, b j f -> b', h, V_inv, h))
+        # print(torch.linalg.norm(- 0.5 * torch.logdet(V)))
+        # print(torch.linalg.norm(beta / (4.0 * self.dim) * torch.einsum('b i f, b i j, b j f -> b', h, V_inv, h)))
+        # print(torch.linalg.norm(torch.einsum('b i f, b i j, b j f -> b', h, V_inv, h)))
+        # print(torch.linalg.norm(V_inv))
         # print(h[0])
         # print(vals)
         # breakpoint()
@@ -256,7 +268,8 @@ class VectorSpinModel(nn.Module):
         # Solve for stationary point of exponential appearing in partition function.
         if use_analytical_grads:
             t_star = self.diff_root_finder(t0, h, beta=beta, solver_fwd_grad_f=(
-                lambda z: self._hess_phi(z, h, beta=beta)))
+                lambda z: self._hess_phi(z, h, beta=beta))
+            )
         else:
             t_star = self.diff_root_finder(t0, h, beta=beta)
 
