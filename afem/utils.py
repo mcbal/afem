@@ -41,6 +41,6 @@ def batch_jacobian(f, x, create_graph=False, swapaxes=True):
     https://discuss.pytorch.org/t/jacobian-functional-api-batch-respecting-jacobian/84571
     """
     def _f_sum(x):
-        return f(x).sum(dim=0)
+        return f(x).sum(dim=0) if callable(f) else f.sum(dim=1)
     jac_f = autograd.functional.jacobian(_f_sum, x, create_graph=create_graph)
     return jac_f.swapaxes(1, 0) if swapaxes else jac_f

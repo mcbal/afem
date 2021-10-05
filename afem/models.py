@@ -57,7 +57,7 @@ class VectorSpinModel(nn.Module):
         if J_add_external:
             # self._J_ext = nn.Parameter(torch.empty(dim, dim).uniform_(-1.0 / np.sqrt(dim**2), 1.0 / np.sqrt(dim**2)))
             # self._J_ext = nn.Parameter(torch.ones(num_spins, num_spins))
-            self.edge_nn = FeedForward(2*dim, dim_out=1, dropout=0.1)
+            self.edge_nn = FeedForward(2*dim, mult=0.5, dim_out=1, dropout=0.1)
             # self.to_q = nn.Linear(dim, dim, bias=False)
             # self.to_k = nn.Linear(dim, dim, bias=False)
         self.J_add_external = J_add_external
@@ -99,7 +99,7 @@ class VectorSpinModel(nn.Module):
             Y2 = Y1.repeat(1, 1, h.shape[1], 1)
             # print(X2.shape, X2.shape)
             Z = torch.cat([X2, Y2], -1)
-            y = Z.view(h.shape[0], h.shape[1], h.shape[1], Z.shape[-1])
+            y = Z.reshape(h.shape[0], h.shape[1], h.shape[1], Z.shape[-1])
             # print(y.shape)
             # breakpoint()
 
@@ -255,7 +255,7 @@ class VectorSpinModel(nn.Module):
         # print(vals)
         # breakpoint()
         return (
-            - 0.5 * torch.logdet(V)
+            -0.5 * torch.logdet(V)
             + beta / (4.0 * self.dim) * torch.einsum('b i f, b i j, b j f -> b', h, V_inv, h)
         )[:, None]
 
