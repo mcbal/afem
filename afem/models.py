@@ -1,4 +1,3 @@
-import math
 from dataclasses import dataclass
 from typing import Optional
 
@@ -7,7 +6,6 @@ import torch.nn as nn
 import numpy as np
 from einops import repeat
 
-from .modules import FeedForward
 from .rootfind import RootFind
 from .utils import batch_eye, batch_eye_like, batch_jacobian, default, exists
 
@@ -22,7 +20,12 @@ class VectorSpinModelOutput:
 
 
 class VectorSpinModel(nn.Module):
-    """Implementation of differentiable steepest-descent approximation of a vector-spin model."""
+    """Implementation of differentiable steepest-descent approximation of a vector-spin model.
+
+    See https://mcbal.github.io/post/transformers-from-spin-models-approximate-free-energy-minimization/.
+
+    TODO: Add second-order derivatives: specific heat and susceptibilities (fluctuations).
+    """
 
     def __init__(
         self,
@@ -35,13 +38,17 @@ class VectorSpinModel(nn.Module):
         J_add_external=False,
         J_symmetric=True,
         J_traceless=True,
+        solver_fwd_max_iter=40,
+        solver_fwd_tol=1e-5,
+        solver_bwd_max_iter=40,
+        solver_bwd_tol=1e-5,
     ):
         super().__init__()
 
         self.num_spins = num_spins
         self.dim = dim
 
-        # Setup inverse temperature.
+        # Beta stuff.
         beta = torch.as_tensor(beta)
         if beta_parameter:
             self.beta = nn.Parameter(beta)
@@ -50,16 +57,15 @@ class VectorSpinModel(nn.Module):
         else:
             self.register_buffer('beta', beta)
 
-        # Setup couplings (internal and external).
-        self._J = nn.Parameter(torch.empty(num_spins, num_spins).normal_(
-            0.0, J_init_std if exists(J_init_std) else 1.0 / np.sqrt(num_spins * dim)
-        ))
+        # Coupling stuff.
+        self._J = nn.Parameter(
+            torch.empty(num_spins, num_spins).normal_(
+                0.0, J_init_std if exists(J_init_std) else 1.0 / np.sqrt(num_spins*dim)
+            )
+        )
         if J_add_external:
-            # self._J_ext = nn.Parameter(torch.empty(dim, dim).uniform_(-1.0 / np.sqrt(dim**2), 1.0 / np.sqrt(dim**2)))
-            # self._J_ext = nn.Parameter(torch.ones(num_spins, num_spins))
-            self.edge_nn = FeedForward(2*dim, mult=0.5, dim_out=1, dropout=0.1)
-            # self.to_q = nn.Linear(dim, dim, bias=False)
-            # self.to_k = nn.Linear(dim, dim, bias=False)
+            self.to_q = nn.Linear(dim, dim, bias=False)
+            self.to_k = nn.Linear(dim, dim, bias=False)
         self.J_add_external = J_add_external
         self.J_symmetric = J_symmetric
         self.J_traceless = J_traceless
@@ -67,10 +73,10 @@ class VectorSpinModel(nn.Module):
         # Initialize implicit layer for differentiable root-finding.
         self.diff_root_finder = RootFind(
             self._jac_phi,
-            solver_fwd_max_iter=40,
-            solver_fwd_tol=1e-5,
-            solver_bwd_max_iter=40,
-            solver_bwd_tol=1e-5,
+            solver_fwd_max_iter=solver_fwd_max_iter,
+            solver_fwd_tol=solver_fwd_tol,
+            solver_bwd_max_iter=solver_bwd_max_iter,
+            solver_bwd_tol=solver_bwd_tol,
         )
 
     def J(self, h):
@@ -79,42 +85,19 @@ class VectorSpinModel(nn.Module):
         The functional choice of how to add sources into the couplings is by no means unique. The
         choice below, in combination with the weight initializations above. yields contributions
         of roughly the same order of magnitude in norm.
+
+        TODO: Making this an `nn.Module` on its own might be cleaner and more composable.
+        TODO: Find a way to cache the result of this function without breaking autograd. Maybe use
+                the new `torch.nn.utils.parametrize` functionality in `torch>=1.9.0`.
         """
         bsz, num_spins, dim, J = h.size(0), h.size(1), h.size(2), self._J
-
         J = repeat(J, 'i j -> b i j', b=bsz)
-
-        # print(torch.linalg.norm(J).item(), torch.linalg.norm(h[0]).item(), 'inside J')
-        # breakpoint()
         if self.J_add_external:
-            # q, k = self.to_q(h), self.to_k(h)
-            # inside = torch.einsum('b i f, b j f -> b i j', q, k) / np.sqrt(dim**2*num_spins)
-            # ext = torch.tanh(inside)
-
-            # breakpoint()
-            X1 = h.unsqueeze(1)
-            Y1 = h.unsqueeze(2)
-            # print(X1.shape, Y1.shape)
-            X2 = X1.repeat(1, h.shape[1], 1, 1)
-            Y2 = Y1.repeat(1, 1, h.shape[1], 1)
-            # print(X2.shape, X2.shape)
-            Z = torch.cat([X2, Y2], -1)
-            y = Z.reshape(h.shape[0], h.shape[1], h.shape[1], Z.shape[-1])
-            # print(y.shape)
-            # breakpoint()
-
-            ext = self.edge_nn(y).squeeze(-1) / np.sqrt(num_spins*dim)
-
-            # print(
-            #     torch.linalg.norm(J[0]).item(),
-            #     torch.linalg.norm(ext[0]).item(),
-            # )
-
+            q, k = self.to_q(h), self.to_k(h)
+            # print('j', J.norm())
+            ext = torch.tanh(torch.einsum('b i f, b j f -> b i j', q, k) / (np.sqrt(dim)))
+            # print(ext.norm())
             J = J + ext
-            # print(
-            #     torch.linalg.norm(J[0]).item(),
-            # )
-
         if self.J_symmetric:
             J = 0.5 * (J + J.permute(0, 2, 1))
         if self.J_traceless:
@@ -133,13 +116,10 @@ class VectorSpinModel(nn.Module):
     def _phi(self, t, h, beta=None, J=None):
         """Compute scalar `phi` given partition function parameters."""
         beta, J = default(beta, self.beta), default(J, self.J(h))
-        # print(t)
         t, V, V_inv = self._phi_prep(t, J)
-
-        # print(torch.linalg.eigvals(V))
         return (
             beta * t.sum(dim=-1) - 0.5 * torch.logdet(V)
-            + beta / (4.0 * self.dim) * torch.einsum('b i f, b i j, b j f -> b', h, V_inv, h)
+            + beta / 4.0 * torch.einsum('b i f, b i j, b j f -> b', h, V_inv, h)
         )[:, None]
 
     def _jac_phi(self, t, h, beta=None, J=None):
@@ -154,13 +134,13 @@ class VectorSpinModel(nn.Module):
         if t.size(-1) == 1:
             return (
                 beta * self.num_spins - 0.5 * torch.diagonal(V_inv, dim1=-2, dim2=-1).sum(dim=-1)
-                - beta / (4.0 * self.dim) * torch.einsum('b j i, b j f, b k f, b i k -> b', V_inv, h, h, V_inv)
-            )[:, None]  # scalar t (same auxiliary variables for every spin)
+                - beta / 4.0 * torch.einsum('b j i, b j f, b k f, b i k -> b', V_inv, h, h, V_inv)
+            )[:, None]
         else:
             return (
                 beta * torch.ones_like(t) - 0.5 * torch.diagonal(V_inv, dim1=-2, dim2=-1)
-                - beta / (4.0 * self.dim) * torch.einsum('b j i, b j f, b k f, b i k -> b i', V_inv, h, h, V_inv)
-            )  # vector t (different auxiliary variables for every spin)
+                - beta / 4.0 * torch.einsum('b j i, b j f, b k f, b i k -> b i', V_inv, h, h, V_inv)
+            )
 
     def _hess_phi(self, t, h, beta=None, J=None):
         """Compute (symmetric) Hessian of `phi` with respect to auxiliary variables `t`.
@@ -175,9 +155,9 @@ class VectorSpinModel(nn.Module):
             return (
                 0.5 * torch.einsum(
                     'b i j, b j i -> b', V_inv, V_inv)
-                + beta / (4.0 * self.dim) * torch.einsum(
+                + beta / 4.0 * torch.einsum(
                     'b k i, b k f, b l f, b j l, b i j -> b', V_inv, h, h, V_inv, V_inv)
-                + beta / (4.0 * self.dim) * torch.einsum(
+                + beta / 4.0 * torch.einsum(
                     'b j i, b l j, b l f, b k f, b i k -> b', V_inv, V_inv, h, h, V_inv)
             )[:, None, None]
         else:
@@ -185,9 +165,9 @@ class VectorSpinModel(nn.Module):
                 0.5 * torch.einsum(
                     'b i j, b j i -> b i j', V_inv, V_inv)
                 + torch.diag_embed(
-                    beta / (4.0 * self.dim) * torch.einsum(
+                    beta / 4.0 * torch.einsum(
                         'b k i, b k f, b l f, b j l, b i j -> b i', V_inv, h, h, V_inv, V_inv)
-                    + beta / (4.0 * self.dim) * torch.einsum(
+                    + beta / 4.0 * torch.einsum(
                         'b j i, b l j, b l f, b k f, b i k -> b i', V_inv, V_inv, h, h, V_inv)
                 )
             )
@@ -195,7 +175,7 @@ class VectorSpinModel(nn.Module):
     def approximate_log_Z(self, t, h, beta=None):
         """Compute steepest-descent approximation of log of parition function for large `self.dim`."""
         beta = default(beta, self.beta)
-        return 0.5 * self.num_spins * torch.log(math.pi / beta) + self._phi(t, h, beta=beta)
+        return -0.5 * self.num_spins * (1.0 + torch.log(2.0*beta)) + self._phi(t, h, beta=beta)
 
     def approximate_free_energy(self, t, h, beta=None):
         """Compute steepest-descent approximation of free energy for large `self.dim`.
@@ -216,10 +196,10 @@ class VectorSpinModel(nn.Module):
         """
         if not h.requires_grad:
             h.requires_grad_()
-        responses = batch_jacobian(
+        magnetizations = batch_jacobian(
             lambda z: self.approximate_log_Z(t, z, beta=beta),
             h, create_graph=True, swapaxes=False)[0]
-        return responses
+        return magnetizations
 
     def internal_energy(self, t, h, beta):
         """Differentiate log(Z) with respect to the sources `beta` to get <E>.
@@ -245,18 +225,9 @@ class VectorSpinModel(nn.Module):
         """
         beta, J = default(beta, self.beta), self.J(h)
         t, V, V_inv = self._phi_prep(t, J)
-        # vals = torch.linalg.eigvals(V)
-
-        # print(torch.linalg.norm(- 0.5 * torch.logdet(V)))
-        # print(torch.linalg.norm(beta / (4.0 * self.dim) * torch.einsum('b i f, b i j, b j f -> b', h, V_inv, h)))
-        # print(torch.linalg.norm(torch.einsum('b i f, b i j, b j f -> b', h, V_inv, h)))
-        # print(torch.linalg.norm(V_inv))
-        # print(h[0])
-        # print(vals)
-        # breakpoint()
         return (
             -0.5 * torch.logdet(V)
-            + beta / (4.0 * self.dim) * torch.einsum('b i f, b i j, b j f -> b', h, V_inv, h)
+            + beta / 4.0 * torch.einsum('b i f, b i j, b j f -> b', h, V_inv, h)
         )[:, None]
 
     def forward(
@@ -275,13 +246,12 @@ class VectorSpinModel(nn.Module):
 
         # Solve for stationary point of exponential appearing in partition function.
         if use_analytical_grads:
-            t_star = self.diff_root_finder(t0, h, beta=beta, solver_fwd_grad_f=(
+            t_star = self.diff_root_finder(t0, h, beta=beta, solver_fwd_jac_f=(
                 lambda z: self._hess_phi(z, h, beta=beta))
             )
         else:
             t_star = self.diff_root_finder(t0, h, beta=beta)
 
-        # TODO: Add second-order derivatives: specific heat and susceptibilities (fluctuations).
         return VectorSpinModelOutput(
             t_star=t_star,
             afe=self.approximate_free_energy(t_star, h, beta=beta) if return_afe else None,

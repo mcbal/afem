@@ -10,7 +10,7 @@ from afem.models import VectorSpinModel
 
 class TestAnalyticalGradients(unittest.TestCase):
     def test_phi_t(self):
-        num_spins, dim = 11, 17
+        num_spins, dim = 11, 63
 
         for (t_vector, J_add_external, J_symmetric) in itertools.product([True, False], repeat=3):
             with self.subTest(t_vector=t_vector, J_add_external=J_add_external, J_symmetric=J_symmetric):
@@ -34,7 +34,7 @@ class TestAnalyticalGradients(unittest.TestCase):
                 )
 
     def test_grad_phi_t(self):
-        num_spins, dim = 11, 17
+        num_spins, dim = 7, 23
 
         for (t_vector, J_add_external, J_symmetric) in itertools.product([True, False], repeat=3):
             with self.subTest(t_vector=t_vector, J_add_external=J_add_external, J_symmetric=J_symmetric):
@@ -60,7 +60,7 @@ class TestAnalyticalGradients(unittest.TestCase):
 
 class TestRootFindingGradients(unittest.TestCase):
     def test_vector_spin_model_afe(self):
-        num_spins, dim = 11, 17
+        num_spins, dim = 7, 127
 
         for (t_vector, use_analytical_grads, J_add_external, J_symmetric) in itertools.product([True, False], repeat=4):
             with self.subTest(
@@ -75,9 +75,13 @@ class TestRootFindingGradients(unittest.TestCase):
                     beta=1.0,
                     J_add_external=J_add_external,
                     J_symmetric=J_symmetric,
+                    solver_fwd_max_iter=100,
+                    solver_fwd_tol=1e-8,
+                    solver_bwd_max_iter=100,
+                    solver_bwd_tol=1e-8,
                 ).double()
 
-                x = torch.randn(1, num_spins, dim).double()
+                x = (torch.randn(1, num_spins, dim) / np.sqrt(dim)).double()
                 t0 = torch.ones(num_spins) if t_vector else torch.ones(1)
                 t0 = t0.double().requires_grad_()
 
@@ -92,7 +96,7 @@ class TestRootFindingGradients(unittest.TestCase):
                 )
 
     def test_vector_spin_model_magnetizations(self):
-        num_spins, dim = 11, 17
+        num_spins, dim = 7, 127
 
         for (t_vector, use_analytical_grads, J_add_external, J_symmetric) in itertools.product([True, False], repeat=4):
             with self.subTest(
@@ -107,9 +111,13 @@ class TestRootFindingGradients(unittest.TestCase):
                     beta=1.0,
                     J_add_external=J_add_external,
                     J_symmetric=J_symmetric,
+                    solver_fwd_max_iter=100,
+                    solver_fwd_tol=1e-8,
+                    solver_bwd_max_iter=100,
+                    solver_bwd_tol=1e-8,
                 ).double()
 
-                x = torch.randn(1, num_spins, dim).double()
+                x = (torch.randn(1, num_spins, dim) / np.sqrt(dim)).double()
                 t0 = torch.ones(num_spins) if t_vector else torch.ones(1)
                 t0 = t0.double().requires_grad_()
 
@@ -118,7 +126,7 @@ class TestRootFindingGradients(unittest.TestCase):
                         lambda z: model(z, t0, return_magnetizations=True, use_analytical_grads=use_analytical_grads).magnetizations,
                         x.requires_grad_(),
                         eps=1e-6,
-                        atol=1e-3,
+                        atol=1e-4,
                         check_undefined_grad=False,
                     )
                 )

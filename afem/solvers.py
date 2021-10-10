@@ -14,17 +14,17 @@ def _check_singular_jacobian(x):
     return x
 
 
-def newton(f, z_init, grad_f=None, max_iter=40, tol=1e-4):
+def newton(f, z_init, jac_f=None, max_iter=40, tol=1e-4):
     """Basic Newton method for finding roots in k variables.
 
-    When `grad_f` is None, the backward hook defined in the forward pass of
+    When `jac_f` is None, the backward hook defined in the forward pass of
     `rootfind.RootFind` needs `create_graph=True` to compute numerical gradients.
     This can be avoided if an analytical expression for the Jacobian is available,
-    which can be passed along to the solver via the `solver_fwd_grad_f` argument.
+    which can be passed along to the solver via the `solver_fwd_jac_f` argument.
     """
 
     def jacobian(f, z):
-        return grad_f(z) if grad_f is not None else batch_jacobian(f, z)
+        return jac_f(z) if jac_f is not None else batch_jacobian(f, z)
 
     def g(z):
         return z - torch.linalg.solve(_check_singular_jacobian(jacobian(f, z)), f(z))

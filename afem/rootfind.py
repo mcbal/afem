@@ -43,9 +43,9 @@ class RootFind(nn.Module):
             # Set up backward hook for solving of linear system in backward pass.
             z_root_bwd = new_z_root.clone().detach().requires_grad_()
 
-            if kwargs.get('solver_fwd_grad_f') is not None:
+            if kwargs.get('solver_fwd_jac_f') is not None:
                 def backward_hook(grad):
-                    return torch.linalg.solve(kwargs['solver_fwd_grad_f'](z_root_bwd), grad)
+                    return torch.linalg.solve(kwargs['solver_fwd_jac_f'](z_root_bwd), grad)
             else:
                 f_bwd = -self.f(z_root_bwd, x, *args, **remove_kwargs(kwargs, 'solver_'))
 

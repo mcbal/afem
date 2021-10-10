@@ -2,9 +2,7 @@
 
 Experimental implementation of approximate free-energy minimization in PyTorch.
 
-**Summary:**
-
-**Blog post:**
+**Blog post: [Transformers from Spin Models: Approximate Free Energy Minimization](https://mcbal.github.io/post/transformers-from-spin-models-approximate-free-energy-minimization/)**
 
 ## Setup
 
@@ -14,10 +12,8 @@ Install package in editable mode:
 $ pip install -e .
 ```
 
-Run tests with:
+Run (very slow) tests with:
 
 ```bash
 $ python -m unittest
 ```
-
-## References

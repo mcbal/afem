@@ -2,7 +2,6 @@ import numpy as np
 import torch.nn as nn
 
 from .models import VectorSpinModel
-from .modules import ScaleNorm
 from .utils import exists
 
 
@@ -15,18 +14,20 @@ class VectorSpinAttention(nn.Module):
         dim,
         pre_norm=True,
         post_norm=False,
-        use_scalenorm=True,
         beta=1.0,
         beta_requires_grad=False,
         beta_parameter=False,
         J_add_external=False,
         J_symmetric=True,
         J_traceless=True,
+        solver_fwd_max_iter=40,
+        solver_fwd_tol=1e-5,
+        solver_bwd_max_iter=40,
+        solver_bwd_tol=1e-5,
     ):
         super().__init__()
 
-        norm_class, norm_dim = (ScaleNorm, np.sqrt(dim)) if use_scalenorm else (nn.LayerNorm, dim)
-        self.pre_norm = norm_class(norm_dim) if pre_norm else nn.Identity()
+        self.pre_norm = nn.LayerNorm(dim) if pre_norm else nn.Identity()
 
         self.spin_model = VectorSpinModel(
             num_spins=num_spins,
@@ -37,9 +38,13 @@ class VectorSpinAttention(nn.Module):
             J_add_external=J_add_external,
             J_symmetric=J_symmetric,
             J_traceless=J_traceless,
+            solver_fwd_max_iter=solver_fwd_max_iter,
+            solver_fwd_tol=solver_fwd_tol,
+            solver_bwd_max_iter=solver_bwd_max_iter,
+            solver_bwd_tol=solver_bwd_tol,
         )
 
-        self.post_norm = norm_class(norm_dim) if post_norm else nn.Identity()
+        self.post_norm = nn.LayerNorm(dim) if post_norm else nn.Identity()
 
     def forward(
             self,
@@ -52,7 +57,7 @@ class VectorSpinAttention(nn.Module):
             return_log_prob=False,
             use_analytical_grads=True,
     ):
-        h = self.pre_norm(x)
+        h = self.pre_norm(x) / np.sqrt(self.spin_model.dim)
 
         out = self.spin_model(
             h,
