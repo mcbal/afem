@@ -35,7 +35,7 @@ class VectorSpinModel(nn.Module):
         beta_requires_grad=True,
         beta_parameter=False,
         J_init_std=None,
-        J_add_external=False,
+        J_external=False,
         J_symmetric=True,
         J_traceless=True,
         solver_fwd_max_iter=40,
@@ -58,15 +58,16 @@ class VectorSpinModel(nn.Module):
             self.register_buffer('beta', beta)
 
         # Coupling stuff.
-        self._J = nn.Parameter(
-            torch.empty(num_spins, num_spins).normal_(
-                0.0, J_init_std if exists(J_init_std) else 1.0 / np.sqrt(num_spins*dim)
-            )
-        )
-        if J_add_external:
+        if J_external:
             self.to_q = nn.Linear(dim, dim, bias=False)
             self.to_k = nn.Linear(dim, dim, bias=False)
-        self.J_add_external = J_add_external
+        else:
+            self._J = nn.Parameter(
+                torch.empty(num_spins, num_spins).normal_(
+                    0.0, J_init_std if exists(J_init_std) else 1.0 / np.sqrt(num_spins*dim)
+                )
+            )
+        self.J_external = J_external
         self.J_symmetric = J_symmetric
         self.J_traceless = J_traceless
 
@@ -82,22 +83,20 @@ class VectorSpinModel(nn.Module):
     def J(self, h):
         """Return couplings tensor.
 
-        The functional choice of how to add sources into the couplings is by no means unique. The
-        choice below, in combination with the weight initializations above. yields contributions
-        of roughly the same order of magnitude in norm.
+        The functional choice of how to turn external inputs into couplings is by no means unique. The
+        choice below, in combination with the weight initializations of the linear maps above, yields
+        contributions of roughly the same order of magnitude in norm as the internal couplings do.
 
         TODO: Making this an `nn.Module` on its own might be cleaner and more composable.
         TODO: Find a way to cache the result of this function without breaking autograd. Maybe use
                 the new `torch.nn.utils.parametrize` functionality in `torch>=1.9.0`.
         """
-        bsz, num_spins, dim, J = h.size(0), h.size(1), h.size(2), self._J
-        J = repeat(J, 'i j -> b i j', b=bsz)
-        if self.J_add_external:
+        bsz, num_spins, dim = h.shape
+        if self.J_external:
             q, k = self.to_q(h), self.to_k(h)
-            # print('j', J.norm())
-            ext = torch.tanh(torch.einsum('b i f, b j f -> b i j', q, k) / (np.sqrt(dim)))
-            # print(ext.norm())
-            J = J + ext
+            J = torch.tanh(torch.einsum('b i f, b j f -> b i j', q, k) * np.sqrt(dim)) / np.sqrt(num_spins*dim)
+        else:
+            J = repeat(self._J, 'i j -> b i j', b=bsz)
         if self.J_symmetric:
             J = 0.5 * (J + J.permute(0, 2, 1))
         if self.J_traceless:
