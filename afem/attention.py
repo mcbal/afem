@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 import torch.nn as nn
 
 from .models import VectorSpinModel
@@ -49,7 +50,7 @@ class VectorSpinAttention(nn.Module):
     def forward(
             self,
             x,
-            t0,
+            t0=None,
             beta=None,
             return_afe=False,
             return_magnetizations=True,
@@ -61,7 +62,7 @@ class VectorSpinAttention(nn.Module):
 
         out = self.spin_model(
             h,
-            t0=t0,
+            t0=t0 if exists(t0) else torch.ones_like(x[0, :, 0]),
             beta=beta,
             return_afe=return_afe,
             return_magnetizations=return_magnetizations,
