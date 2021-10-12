@@ -1,4 +1,5 @@
-# Run forward and backward pass on a `VectorSpinAttention` module and plot `phi` and its derivatives.
+# Sweep across inverse temperature `beta` for fixed inputs to a `VectorSpinModel` module
+# and plot `phi` and its derivatives.
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -26,7 +27,6 @@ def simple_update(frame, fig, axs):
 
     print(f'{frame:.4f} / {10**beta_max}')
 
-    # Setup vector-spin model.
     model = VectorSpinModel(
         num_spins=num_spins,
         dim=dim,

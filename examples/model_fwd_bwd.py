@@ -1,4 +1,4 @@
-# Run forward and backward pass on a `VectorSpinAttention` module and plot `phi` and its derivatives.
+# Run forward and backward pass on a `VectorSpinModel` module and plot `phi` and its derivatives.
 
 import matplotlib.pyplot as plt
 import numpy as np
