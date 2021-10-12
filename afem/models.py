@@ -184,6 +184,7 @@ class VectorSpinModel(nn.Module):
         with respect to gradient-requiring parameters. Careful for implicit dependencies when
         evaluating `t` away from the stationary point where phi'(t*) != 0.
         """
+        beta = default(beta, self.beta)
         return -1.0 / beta * self.approximate_log_Z(t, h, beta=beta)
 
     def magnetizations(self, t, h, beta):
