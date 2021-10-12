@@ -46,18 +46,18 @@ def simple_update(frame, fig, axs):
 
     axs[0].clear()
     axs[0].set_title(
-        f"beta = {frame:.4f}, t = {t_star:.4f}, afe = {afe_star:.4f}")
+        f"$\\beta$ = {frame:.4f}, t = {t_star:.4f}, afe = {afe_star:.4f}")
     axs[0].plot(t_range.numpy().squeeze(), filter_array(phis), 'r-')
     axs[0].axvline(x=out.t_star[0].detach().numpy())
     axs[0].set_ylim([-plot_values_cutoff, plot_values_cutoff])
-    axs[0].set_ylabel("phi(t)")
+    axs[0].set_ylabel("$\\varphi$(t)")
 
     axs[1].clear()
     axs[1].plot(t_range.numpy().squeeze(), filter_array(grad_phis), 'r-')
     axs[1].axvline(x=out.t_star[0].detach().numpy())
     axs[1].axhline(y=0.0)
     axs[1].set_ylim([-plot_values_cutoff, 100])
-    axs[1].set_ylabel("phi'(t)")
+    axs[1].set_ylabel("$\\varphi$'(t)")
 
     axs[2].clear()
     axs[2].plot(t_range.numpy().squeeze(), filter_array(grad_grad_phis, 2*plot_values_cutoff), 'r-')
@@ -65,7 +65,7 @@ def simple_update(frame, fig, axs):
     axs[2].set_xlim([t_min, t_max])
     axs[2].set_xlabel('t')
     axs[2].set_ylim([0, 2*plot_values_cutoff])
-    axs[2].set_ylabel("phi''(t)")
+    axs[2].set_ylabel("$\\varphi$''(t)")
 
     fig.align_ylabels(axs)
 

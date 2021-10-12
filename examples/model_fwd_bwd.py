@@ -29,9 +29,9 @@ print(
 # Run backward on sum of free energies across batch dimension.
 out.afe.sum().backward()
 
-#########################################################################################
-# Plot internally-used function `phi(t)` and its derivatives for first element in batch. #
-#########################################################################################
+###############################################################
+# Plot internally-used function `phi(t)` and its derivatives. #
+###############################################################
 
 if x.size(0) == 1 and t0.numel() == 1:
 
@@ -56,10 +56,10 @@ if x.size(0) == 1 and t0.numel() == 1:
     fig, axs = plt.subplots(3, 1, sharex=True)
 
     axs[0].set_title(
-        f"Found root of phi'(t) at t = {t_star:.4f} (afe = {afe_star:.4f})")
+        f"Found root of $\\varphi$'(t) at t = {t_star:.4f} (afe = {afe_star:.4f})")
     axs[0].plot(t_range.numpy().squeeze(), filter_array(phis), 'r-')
     axs[0].axvline(x=out.t_star[0].detach().numpy())
-    axs[0].set_ylabel("phi(t)")
+    axs[0].set_ylabel("$\\varphi$(t)")
 
     axs[1].plot(t_range.numpy().squeeze(), filter_array(grad_phis), 'r-')
     axs[1].axvline(x=out.t_star[0].detach().numpy())
@@ -74,13 +74,13 @@ if x.size(0) == 1 and t0.numel() == 1:
     axs1_inset.set_xticklabels('')
     axs1_inset.set_yticklabels('')
     axs[1].indicate_inset_zoom(axs1_inset, edgecolor="black")
-    axs[1].set_ylabel("phi'(t)")
+    axs[1].set_ylabel("$\\varphi$'(t)")
 
     axs[2].plot(t_range.numpy().squeeze(), filter_array(grad_grad_phis), 'r-')
     axs[2].axvline(x=out.t_star[0].detach().numpy())
     axs[2].set_xlim([t_min, t_max])
     axs[2].set_xlabel('t')
-    axs[2].set_ylabel("phi''(t)")
+    axs[2].set_ylabel("$\\varphi$''(t)")
 
     fig.align_ylabels(axs)
     # plt.savefig('plot.png', bbox_inches='tight')

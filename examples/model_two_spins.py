@@ -8,7 +8,6 @@ import torch
 from afem.models import VectorSpinModel
 
 num_spins, dim = 2, 64
-plot_3d = False
 
 # Setup vector-spin model.
 model = VectorSpinModel(
@@ -56,4 +55,5 @@ ax.set_title(f'$\\varphi(t)$ for two spins (t = ({t_star[0]:.4f}, {t_star[1]:.4f
 ax.set_xlabel('$t_0$')
 ax.set_ylabel('$t_1$')
 plt.colorbar(artist)
+# plt.savefig('plot.png', bbox_inches='tight')
 plt.show()
