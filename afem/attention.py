@@ -52,10 +52,6 @@ class VectorSpinAttention(nn.Module):
             x,
             t0=None,
             beta=None,
-            return_afe=False,
-            return_magnetizations=True,
-            return_internal_energy=False,
-            return_log_prob=False,
             use_analytical_grads=True,
     ):
         h = self.pre_norm(x) / np.sqrt(self.spin_model.dim)
@@ -64,13 +60,8 @@ class VectorSpinAttention(nn.Module):
             h,
             t0=t0 if exists(t0) else torch.ones_like(x[0, :, 0]),
             beta=beta,
-            return_afe=return_afe,
-            return_magnetizations=return_magnetizations,
-            return_internal_energy=return_internal_energy,
-            return_log_prob=return_log_prob,
+            return_magnetizations=True,
             use_analytical_grads=use_analytical_grads,
         )
 
-        out.magnetizations = self.post_norm(out.magnetizations) if exists(out.magnetizations) else None
-
-        return out
+        return self.post_norm(out.magnetizations)
