@@ -1,3 +1,5 @@
+<img src="./images/spins.png" width="400px"></img>
+
 # Approximate Free-Energy Minimization
 
 Experimental implementation of approximate free-energy minimization in PyTorch.
