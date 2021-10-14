@@ -29,9 +29,9 @@ print(
 # Run backward on sum of free energies across batch dimension.
 out.afe.sum().backward()
 
-###############################################################
-# Plot internally-used function `phi(t)` and its derivatives. #
-###############################################################
+##############
+# PLOT STUFF #
+##############
 
 if x.size(0) == 1 and t0.numel() == 1:
 

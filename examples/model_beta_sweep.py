@@ -1,5 +1,5 @@
 # Sweep across inverse temperature `beta` for fixed inputs to a `VectorSpinModel` module
-# and plot `phi` and its derivatives.
+# and return plots of `phi` and its derivatives as an animated GIF.
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,8 +13,14 @@ num_spins, dim = 32, 128
 beta_min, beta_max, beta_num_steps = -0.6, 1.0, 100  # log10-space
 plot_values_cutoff = 500
 
+# Fixed inputs and initial auxiliary variable.
 x = (torch.randn(1, num_spins, dim) / np.sqrt(dim)).requires_grad_()
 t0 = 0.5*torch.ones(1)
+
+
+##############
+# PLOT STUFF #
+##############
 
 
 def filter_array(a, threshold=plot_values_cutoff):
@@ -27,17 +33,20 @@ def simple_update(frame, fig, axs):
 
     print(f'{frame:.4f} / {10**beta_max}')
 
+    # Setup vector-spin model.
     model = VectorSpinModel(
         num_spins=num_spins,
         dim=dim,
         beta=frame,
     )
-    out = model(x, t0=t0, return_afe=True, return_magnetizations=True)
+    # Run forward pass.
+    out = model(x, t0=t0, return_afe=True)
 
     t_star = out.t_star[0][0].detach().numpy()
     afe_star = out.afe[0][0].detach().numpy()
     t_min, t_max, t_step = 0.0, 3.0, 0.001
     t_range = torch.arange(t_min, t_max, t_step)[:, None]
+
     phis = np.array(model._phi(t_range, x[:1, :, :].repeat(t_range.numel(), 1, 1)).detach().numpy())
     grad_phis = np.array(model._jac_phi(
         t_range, x[:1, :, :].repeat(t_range.numel(), 1, 1)).detach().numpy())

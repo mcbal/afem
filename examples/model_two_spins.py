@@ -27,6 +27,10 @@ print(
     f'✨ t_star {out.t_star.detach()}\n✨ magnetizations: {out.magnetizations}\n✨ approximate free energy: {out.afe.detach()}'
 )
 
+##############
+# PLOT STUFF #
+##############
+
 
 def filter_array(a, threshold=50):
     idx = np.where(np.abs(a) > threshold)
